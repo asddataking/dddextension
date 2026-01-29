@@ -93,23 +93,59 @@ function parseMgTotal(text) {
 /**
  * Weedmaps: product cards are list items or containers with a product link + price + weight (e.g. "1/8 oz", "1 g").
  * Look for links to /menu/ and their parent card that has price and weight text.
+ * Also searches within main content and accepts various weight formats.
  * @param {Document} doc
  * @returns {Array<{ container: Element, fullText: string }>}
  */
+function findAllBySelector(root, selector) {
+  const out = [];
+  const collect = (el) => {
+    try {
+      const matches = el.querySelectorAll(selector);
+      for (let i = 0; i < matches.length; i++) out.push(matches[i]);
+      const children = el.querySelectorAll("*");
+      for (let i = 0; i < children.length; i++) {
+        const c = children[i];
+        if (c.shadowRoot) collect(c.shadowRoot);
+      }
+    } catch (_) {}
+  };
+  collect(root);
+  return out;
+}
+
 function findWeedmapsCards(doc) {
   const candidates = [];
-  const productLinks = doc.querySelectorAll('a[href*="/menu/"]');
+  const root = doc.querySelector("main") || doc.body;
+  if (!root) return [];
+
+  const productLinks = findAllBySelector(root, 'a[href*="/menu/"], a[href*="menu"]');
   const seen = new Set();
+
+  const hasWeightInText = (text) => {
+    return (
+      WEIGHT_GRAM_REGEX.test(text) ||
+      WEIGHT_FRAC_REGEX.test(text) ||
+      /\b1\/8\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\/4\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\/2\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\s*g\b/i.test(text) ||
+      /\b3\.5\s*g\b/i.test(text) ||
+      /\b7\s*g\b/i.test(text) ||
+      /\b(oz|ounce)\b/i.test(text)
+    );
+  };
 
   for (const link of productLinks) {
     const linkText = (link.textContent || "").trim();
     if (!linkText || linkText.length < 3) continue;
     const href = (link.getAttribute("href") || "").trim();
-    if (!href.includes("/menu/")) continue;
+    if (!href.includes("menu")) continue;
 
     let card = link.closest("li") || link.closest("[role='listitem']") || link.parentElement;
     let depth = 0;
-    while (card && depth < 12) {
+    while (card && depth < 15) {
+      if (card === root) break;
       const text = (card.textContent || "").trim();
       if (text.length < 15) {
         card = card.parentElement;
@@ -117,7 +153,7 @@ function findWeedmapsCards(doc) {
         continue;
       }
       const hasPrice = PRICE_REGEX.test(text);
-      const hasWeight = WEIGHT_GRAM_REGEX.test(text) || WEIGHT_FRAC_REGEX.test(text) || /\b1\/8\s*oz\b/i.test(text) || /\b1\/4\s*oz\b/i.test(text) || /\b1\s*g\b/i.test(text);
+      const hasWeight = hasWeightInText(text);
       if (hasPrice && hasWeight) {
         const key = card.getAttribute?.("data-ddd-seen") || (card.className + " " + text.slice(0, 100));
         if (seen.has(key)) break;
@@ -133,18 +169,13 @@ function findWeedmapsCards(doc) {
 }
 
 /**
- * Find card-like containers: elements that contain $ and digits (price).
- * Walk up to a container that has both price and some title-like text.
+ * Generic: find elements containing price text by walking the DOM from text nodes.
  * @param {Document} doc
- * @param {"weedmaps"|"dutchie"} site
  * @returns {Array<{ container: Element, priceText: string, fullText: string }>}
  */
-function findCardCandidates(doc, site) {
-  if (site === "weedmaps") {
-    const weedmapsCards = findWeedmapsCards(doc);
-    return weedmapsCards.map((c) => ({ container: c.container, priceText: (c.fullText.match(PRICE_REGEX) || [""])[0], fullText: c.fullText }));
-  }
+function findCardCandidatesGeneric(doc) {
   const candidates = [];
+  if (!doc.body) return candidates;
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
   const priceNodes = [];
   let n;
@@ -187,6 +218,24 @@ function findCardCandidates(doc, site) {
     }
   }
   return candidates;
+}
+
+/**
+ * Find card-like containers: elements that contain $ and digits (price).
+ * For Weedmaps, try findWeedmapsCards first; fall back to generic walker if none found.
+ * @param {Document} doc
+ * @param {"weedmaps"|"dutchie"} site
+ * @returns {Array<{ container: Element, priceText: string, fullText: string }>}
+ */
+function findCardCandidates(doc, site) {
+  if (site === "weedmaps") {
+    const weedmapsCards = findWeedmapsCards(doc);
+    if (weedmapsCards.length > 0) {
+      return weedmapsCards.map((c) => ({ container: c.container, priceText: (c.fullText.match(PRICE_REGEX) || [""])[0], fullText: c.fullText }));
+    }
+    return findCardCandidatesGeneric(doc);
+  }
+  return findCardCandidatesGeneric(doc);
 }
 
 /**
