@@ -136,7 +136,7 @@ document.getElementById("clear").addEventListener("click", async () => {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
-        const badges = document.querySelectorAll(".ddd-badge, .ddd-panel");
+        const badges = document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-overlay-backdrop");
         badges.forEach((el) => el.remove());
         document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
         return badges.length;
