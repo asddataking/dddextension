@@ -94,13 +94,23 @@ document.getElementById("analyze").addEventListener("click", async () => {
     return;
   }
 
-  chrome.tabs.sendMessage(tab.id, { type: "DDD_ANALYZE", payload: { site } }, (response) => {
-    if (chrome.runtime.lastError) {
-      setOutput("Could not analyze: " + (chrome.runtime.lastError.message || "message failed").slice(0, 80));
+  // Run analyze in the tab via executeScript (avoids "Receiving end does not exist" from sendMessage).
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (siteArg) => {
+        return typeof window.__dddRunAnalyze === "function"
+          ? window.__dddRunAnalyze({ site: siteArg })
+          : Promise.resolve({ ok: false, items: [], count: 0, parser: siteArg });
+      },
+      args: [site],
+    });
+    const res = results && results[0] && results[0].result;
+    if (!res) {
+      setOutput("Could not analyze: no result from page.");
       setDebug(0, site);
       return;
     }
-    const res = response || {};
     const count = res.count ?? 0;
     const items = res.items || [];
     setDebug(count, res.parser || site);
@@ -109,7 +119,11 @@ document.getElementById("analyze").addEventListener("click", async () => {
     } else {
       setOutputList(items);
     }
-  });
+  } catch (e) {
+    if (DEBUG) console.warn("[DDD popup] run error", e);
+    setOutput("Could not analyze: " + (e && e.message ? e.message : "run failed").slice(0, 80));
+    setDebug(0, site);
+  }
 });
 
 document.getElementById("clear").addEventListener("click", async () => {
@@ -119,12 +133,17 @@ document.getElementById("clear").addEventListener("click", async () => {
     return;
   }
   try {
-    chrome.tabs.sendMessage(tab.id, { type: "DDD_CLEAR" }, () => {
-      setOutput("Badges cleared.");
-      if (chrome.runtime.lastError) {
-        setOutput("Clear may have failed (reload page if badges remain).");
-      }
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const badges = document.querySelectorAll(".ddd-badge, .ddd-panel");
+        badges.forEach((el) => el.remove());
+        document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
+        return badges.length;
+      },
     });
+    const removed = (results && results[0] && results[0].result) ?? 0;
+    setOutput(removed > 0 ? "Badges cleared." : "Nothing to clear (or page changed).");
   } catch (e) {
     setOutput("Could not clear: " + (e && e.message ? e.message : "error").slice(0, 60));
   }

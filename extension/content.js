@@ -120,3 +120,8 @@ function clearBadges() {
   document.querySelectorAll(".ddd-badge, .ddd-panel").forEach((el) => el.remove());
   document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
 }
+
+// Expose for popup to call via executeScript (avoids "Receiving end does not exist").
+if (typeof window !== "undefined") {
+  window.__dddRunAnalyze = (payload) => runAnalyze(payload);
+}
