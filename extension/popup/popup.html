@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deal Checker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">Deal Checker</h1>
+    <p id="status" class="status">Checking site…</p>
+    <div class="actions">
+      <button id="analyze" type="button">Analyze this page</button>
+      <button id="clear" type="button">Clear badges</button>
+    </div>
+    <div id="output" class="output"></div>
+    <details class="debug-accordion">
+      <summary>Debug</summary>
+      <pre id="debug-content">—</pre>
+    </details>
+  </div>
+  <script src="../utils/id.js"></script>
+  <script src="../utils/domains.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
