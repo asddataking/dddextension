@@ -221,8 +221,69 @@ function findCardCandidatesGeneric(doc) {
 }
 
 /**
+ * Dutchie embedded menu: product cards have links to /product/ and buttons like "1g $12.00 Add 1g to cart", "1/8 oz $25.00".
+ * Return one candidate per price option (same product can have multiple weights/prices).
+ * @param {Document} doc
+ * @returns {Array<{ container: Element, fullText: string }>}
+ */
+function findDutchieCards(doc) {
+  const candidates = [];
+  const root = doc.querySelector("main") || doc.body;
+  if (!root) return [];
+
+  const hasWeightInText = (text) => {
+    return (
+      WEIGHT_GRAM_REGEX.test(text) ||
+      WEIGHT_FRAC_REGEX.test(text) ||
+      /\b1\/8\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\/4\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\/2\s*(oz|ounce)?\b/i.test(text) ||
+      /\b1\s*g\b/i.test(text) ||
+      /\b3\.5\s*g\b/i.test(text) ||
+      /\b7\s*g\b/i.test(text) ||
+      /\b(oz|ounce)\b/i.test(text)
+    );
+  };
+
+  const productLinks = root.querySelectorAll('a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"]');
+  const seen = new Set();
+
+  for (const link of productLinks) {
+    const productName = (link.textContent || "").replace(/\s*product\s*$/i, "").trim().slice(0, 120);
+    if (!productName) continue;
+
+    let card = link.closest("article") || link.closest("[class*='product']") || link.closest("[class*='card']") || link.parentElement;
+    let depth = 0;
+    while (card && depth < 20) {
+      const buttons = card.querySelectorAll("button, [role='button']");
+      let foundAny = false;
+      for (const btn of buttons) {
+        const btnText = (btn.textContent || "").trim();
+        if (!PRICE_REGEX.test(btnText) || !hasWeightInText(btnText)) continue;
+        const priceMatch = btnText.match(PRICE_REGEX);
+        if (!priceMatch) continue;
+        const key = productName + "|" + btnText.slice(0, 50);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        foundAny = true;
+        candidates.push({
+          container: btn.closest("div") || btn.parentElement || card,
+          fullText: productName + " " + btnText,
+        });
+      }
+      if (foundAny) break;
+      card = card.parentElement;
+      depth++;
+    }
+  }
+
+  if (candidates.length > 0) return candidates;
+  return findCardCandidatesGeneric(doc);
+}
+
+/**
  * Find card-like containers: elements that contain $ and digits (price).
- * For Weedmaps, try findWeedmapsCards first; fall back to generic walker if none found.
+ * For Weedmaps, try findWeedmapsCards first; for Dutchie, try findDutchieCards; else generic walker.
  * @param {Document} doc
  * @param {"weedmaps"|"dutchie"} site
  * @returns {Array<{ container: Element, priceText: string, fullText: string }>}
@@ -232,6 +293,13 @@ function findCardCandidates(doc, site) {
     const weedmapsCards = findWeedmapsCards(doc);
     if (weedmapsCards.length > 0) {
       return weedmapsCards.map((c) => ({ container: c.container, priceText: (c.fullText.match(PRICE_REGEX) || [""])[0], fullText: c.fullText }));
+    }
+    return findCardCandidatesGeneric(doc);
+  }
+  if (site === "dutchie") {
+    const dutchieCards = findDutchieCards(doc);
+    if (dutchieCards.length > 0) {
+      return dutchieCards.map((c) => ({ container: c.container, priceText: (c.fullText.match(PRICE_REGEX) || [""])[0], fullText: c.fullText }));
     }
     return findCardCandidatesGeneric(doc);
   }
@@ -271,6 +339,12 @@ function parseItemsFromDOM(site) {
         const productLink = container.querySelector('a[href*="/menu/"]');
         if (productLink) {
           name = (productLink.textContent || "").replace(/\s*product detail page\s*/i, "").trim().slice(0, 120);
+        }
+      }
+      if (site === "dutchie") {
+        const productLink = container.querySelector('a[href*="/product/"]');
+        if (productLink) {
+          name = (productLink.textContent || "").replace(/\s*product\s*$/i, "").trim().slice(0, 120);
         }
       }
       if (!name) {

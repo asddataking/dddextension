@@ -12,12 +12,14 @@
       "128": "icons/128.png"
     }
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "webNavigation"],
   "optional_host_permissions": [
     "*://*.weedmaps.com/*",
     "*://weedmaps.com/*",
     "*://*.dutchie.com/*",
-    "*://dutchie.com/*"
+    "*://dutchie.com/*",
+    "*://mindrightmi.com/*",
+    "*://*.mindrightmi.com/*"
   ],
   "background": {
     "service_worker": "service-worker.js"

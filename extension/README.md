@@ -14,6 +14,7 @@ Chrome Extension (Manifest V3) that overlays **Worth It / Mid / Taxed** badges o
 
 - **Weedmaps** (`weedmaps.com` and subdomains)
 - **Dutchie** (`dutchie.com` and subdomains)
+- **Dutchie-powered dispensary sites** (e.g. [mindrightmi.com](https://mindrightmi.com) — the menu is in an iframe from `dutchie.com/embedded-menu`; the extension injects into that iframe to analyze)
 
 On other sites, the popup shows **Site: Unknown** and Analyze is disabled.
 
@@ -47,4 +48,21 @@ On other sites, the popup shows **Site: Unknown** and Analyze is disabled.
 
 No database keys, Supabase service-role keys, or Stripe secrets are used in this extension.
 
-**Console messages:** Form-field and Content Security Policy (CSP) messages that mention scripts like `up.js` or refer to the host page (e.g. Weedmaps) come from the **website**, not from this extension. The extension uses only external scripts and styles (no inline script or style) and gives overlay buttons an `id` and `name` where relevant.
+## Console errors on Weedmaps (not from this extension)
+
+When you have a Weedmaps tab open, the browser console may show errors. **None of these are caused by the Deal Checker extension.** They come from Weedmaps or its third-party scripts:
+
+| What you see | Who causes it | What it means |
+|--------------|----------------|----------------|
+| `api-g.weedmaps.com/...` 400 or failed to load | Weedmaps | Their API request failed (e.g. scheduling). |
+| `static.newsbreak.com` / framing violates CSP | Weedmaps / Newsbreak | The site’s CSP is blocking an iframe (e.g. Newsbreak). |
+| `connect-src` / connection blocked | Weedmaps | The page’s CSP is blocking a script from connecting to some URL. |
+| `up.js` / script-src / inline execution blocked | Weedmaps or analytics | A script on the page (e.g. `up.js`) is using inline scripts or `javascript:` URLs; the site’s own CSP blocks it. |
+
+This extension does **not**:
+
+- Call Weedmaps APIs, load iframes, or connect to third-party domains.
+- Inject inline scripts, `onclick` handlers, or `javascript:` URLs.
+- Change the page’s Content Security Policy.
+
+We only inject **external** JS/CSS files and use `addEventListener` in our code. CSP and “form field” messages that reference the host page or files like `up.js` are from the **website**, not the extension.
