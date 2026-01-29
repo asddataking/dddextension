@@ -118,6 +118,8 @@ function showLayeredOverlay(scoredItems) {
   titleEl.className = "ddd-overlay-title";
   titleEl.textContent = "Deal Checker";
   const closeBtn = document.createElement("button");
+  closeBtn.id = "ddd-overlay-close-btn";
+  closeBtn.name = "ddd-overlay-close";
   closeBtn.className = "ddd-overlay-close";
   closeBtn.type = "button";
   closeBtn.textContent = "×";
@@ -174,8 +176,7 @@ function showFloatingPanel(items) {
   panel.className = "ddd-panel";
   panel.setAttribute("aria-label", "Deal Checker results");
   const title = document.createElement("div");
-  title.style.fontWeight = "bold";
-  title.style.marginBottom = "6px";
+  title.className = "ddd-panel-title";
   title.textContent = "Deal Checker";
   panel.appendChild(title);
   for (const it of items) {

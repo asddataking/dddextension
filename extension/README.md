@@ -46,3 +46,5 @@ On other sites, the popup shows **Site: Unknown** and Analyze is disabled.
 - **Optional host permissions**: Weedmaps and Dutchie; requested when you first use Analyze on those sites.
 
 No database keys, Supabase service-role keys, or Stripe secrets are used in this extension.
+
+**Console messages:** Form-field and Content Security Policy (CSP) messages that mention scripts like `up.js` or refer to the host page (e.g. Weedmaps) come from the **website**, not from this extension. The extension uses only external scripts and styles (no inline script or style) and gives overlay buttons an `id` and `name` where relevant.
