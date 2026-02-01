@@ -38,13 +38,58 @@ async function runAnalyze(payload) {
 
   clearBadges();
 
+  // #region agent log
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({
+      type: "DDD_DEBUG_LOG",
+      payload: {
+        hypothesisId: "D",
+        location: "content.js:runAnalyze start",
+        message: "document context",
+        data: {
+          site,
+          docHref: typeof document !== "undefined" ? (document.location && document.location.href ? document.location.href.slice(0, 120) : "no href") : "no doc",
+          hasBody: typeof document !== "undefined" && !!document.body,
+          hasDocElement: typeof document !== "undefined" && !!document.documentElement,
+        },
+      },
+    }).catch(() => {});
+  }
+  // #endregion
+
   let items = [];
   try {
     items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+    // #region agent log
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "DDD_DEBUG_LOG",
+        payload: {
+          hypothesisId: "C",
+          location: "content.js:after first parse",
+          message: "parse result",
+          data: { site, firstParseCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
+        },
+      }).catch(() => {});
+    }
+    // #endregion
     // Dutchie menu can render after load; retry once after a short delay if no items
     if (site === "dutchie" && items.length === 0) {
       await new Promise((r) => setTimeout(r, 2000));
       items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+      // #region agent log
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({
+          type: "DDD_DEBUG_LOG",
+          payload: {
+            hypothesisId: "E",
+            location: "content.js:after retry parse",
+            message: "retry parse result",
+            data: { secondParseCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
+          },
+        }).catch(() => {});
+      }
+      // #endregion
     }
   } catch (e) {
     if (DEBUG) console.warn("[DDD content] parse error", e);

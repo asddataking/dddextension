@@ -80,12 +80,14 @@ document.getElementById("analyze").addEventListener("click", async () => {
 
   // For Dutchie-powered sites (e.g. mindrightmi.com), menu is in an iframe from dutchie.com/embedded-menu. Inject into that frame.
   let target = { tabId: tab.id };
+  let framesSnapshot = [];
   if (site === "dutchie") {
     try {
       const isDutchiePoweredHost = url && !url.includes("dutchie.com");
       let dutchieFrame = null;
       for (let attempt = 0; attempt < (isDutchiePoweredHost ? 5 : 1); attempt++) {
         const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+        framesSnapshot = (frames || []).map((f) => ({ id: f.frameId, url: (f.url || "").slice(0, 120) }));
         dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
         if (dutchieFrame) break;
         if (isDutchiePoweredHost && attempt < 4) await new Promise((r) => setTimeout(r, 800));
@@ -93,9 +95,35 @@ document.getElementById("analyze").addEventListener("click", async () => {
       if (dutchieFrame && dutchieFrame.frameId !== 0) {
         target = { tabId: tab.id, frameIds: [dutchieFrame.frameId] };
       } else if (dutchieFrame && dutchieFrame.frameId === 0) {
-        // Already on dutchie.com/embedded-menu in main frame
         target = { tabId: tab.id };
       }
+      // #region agent log
+      chrome.runtime.sendMessage({
+        type: "DDD_DEBUG_LOG",
+        payload: {
+          hypothesisId: "A",
+          location: "popup.js:frame selection",
+          message: "injection target",
+          data: {
+            tabUrl: (url || "").slice(0, 100),
+            site,
+            hasFrameIds: !!target.frameIds,
+            frameId: target.frameIds ? target.frameIds[0] : null,
+            foundDutchieFrame: !!dutchieFrame,
+            dutchieFrameId: dutchieFrame ? dutchieFrame.frameId : null,
+          },
+        },
+      }).catch(() => {});
+      chrome.runtime.sendMessage({
+        type: "DDD_DEBUG_LOG",
+        payload: {
+          hypothesisId: "B",
+          location: "popup.js:frames",
+          message: "frame list",
+          data: { frameCount: framesSnapshot.length, frameUrls: framesSnapshot },
+        },
+      }).catch(() => {});
+      // #endregion
     } catch (_) {
       // Fall back to main frame
     }

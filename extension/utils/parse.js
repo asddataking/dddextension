@@ -245,6 +245,11 @@ function findCardCandidatesGeneric(doc) {
  */
 function findDutchieCards(doc) {
   const candidates = [];
+  // #region agent log
+  try {
+    if (typeof window !== "undefined") window.__dddParseDebug = window.__dddParseDebug || {};
+  } catch (_) {}
+  // #endregion
   // Start from documentElement so we traverse into top-level shadow roots (e.g. body > app-host #shadow-root)
   const root = doc.documentElement || doc.body;
   if (!root) return [];
@@ -268,6 +273,11 @@ function findDutchieCards(doc) {
     root,
     'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"]'
   );
+  // #region agent log
+  try {
+    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieProductLinks = productLinks.length;
+  } catch (_) {}
+  // #endregion
   const seen = new Set();
 
   for (const link of productLinks) {
@@ -299,6 +309,11 @@ function findDutchieCards(doc) {
     }
   }
 
+  // #region agent log
+  try {
+    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieAfterLink = candidates.length;
+  } catch (_) {}
+  // #endregion
   if (candidates.length > 0) return candidates;
 
   // Strategy 2: find any buttons with price + weight (e.g. "1g $12.00 Add to cart") and use their container as card
@@ -328,8 +343,19 @@ function findDutchieCards(doc) {
     }
   }
 
+  // #region agent log
+  try {
+    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieAfterButton = candidates.length;
+  } catch (_) {}
+  // #endregion
   if (candidates.length > 0) return candidates;
-  return findCardCandidatesGeneric(doc);
+  const genericResult = findCardCandidatesGeneric(doc);
+  // #region agent log
+  try {
+    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieGenericCount = genericResult.length;
+  } catch (_) {}
+  // #endregion
+  return genericResult;
 }
 
 /**
@@ -364,6 +390,11 @@ function findCardCandidates(doc, site) {
  */
 function parseItemsFromDOM(site) {
   try {
+    // #region agent log
+    try {
+      if (typeof window !== "undefined") window.__dddParseDebug = undefined;
+    } catch (_) {}
+    // #endregion
     const doc = typeof document !== "undefined" ? document : null;
     if (!doc || !doc.body) return [];
 
