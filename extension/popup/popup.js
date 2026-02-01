@@ -147,7 +147,7 @@ document.getElementById("clear").addEventListener("click", async () => {
     return;
   }
   const clearFunc = () => {
-    const badges = document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-overlay-backdrop");
+    const badges = document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-sidebar-backdrop");
     badges.forEach((el) => el.remove());
     document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
     return badges.length;
