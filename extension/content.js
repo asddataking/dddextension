@@ -59,38 +59,31 @@ async function runAnalyze(payload) {
 
   let items = [];
   try {
-    items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+    // Dutchie: SPA often renders product list after load; poll parse until items found or timeout (8s)
+    if (site === "dutchie" && typeof parseItemsFromDOM === "function") {
+      const maxAttempts = 20;
+      const intervalMs = 400;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        items = parseItemsFromDOM(site);
+        if (items.length > 0) break;
+        if (attempt < maxAttempts - 1) await new Promise((r) => setTimeout(r, intervalMs));
+      }
+    } else {
+      items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+    }
     // #region agent log
     if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({
         type: "DDD_DEBUG_LOG",
         payload: {
           hypothesisId: "C",
-          location: "content.js:after first parse",
+          location: "content.js:after parse",
           message: "parse result",
-          data: { site, firstParseCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
+          data: { site, itemCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
         },
       }).catch(() => {});
     }
     // #endregion
-    // Dutchie menu can render after load; retry once after a short delay if no items
-    if (site === "dutchie" && items.length === 0) {
-      await new Promise((r) => setTimeout(r, 2000));
-      items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
-      // #region agent log
-      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({
-          type: "DDD_DEBUG_LOG",
-          payload: {
-            hypothesisId: "E",
-            location: "content.js:after retry parse",
-            message: "retry parse result",
-            data: { secondParseCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
-          },
-        }).catch(() => {});
-      }
-      // #endregion
-    }
   } catch (e) {
     if (DEBUG) console.warn("[DDD content] parse error", e);
   }
