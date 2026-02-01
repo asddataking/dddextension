@@ -245,7 +245,11 @@ function findDutchieCards(doc) {
     );
   };
 
-  const productLinks = root.querySelectorAll('a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"]');
+  // Traverse shadow DOM so we find product links inside Dutchie's custom elements
+  const productLinks = findAllBySelector(
+    root,
+    'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"]'
+  );
   const seen = new Set();
 
   for (const link of productLinks) {

@@ -30,10 +30,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
  * @param {{ site: string }} payload
  * @returns {Promise<{ ok: boolean, items: Array, count: number, parser: string }>}
  */
-function runAnalyze(payload) {
+async function runAnalyze(payload) {
   const site = payload?.site || "unknown";
   if (site !== "weedmaps" && site !== "dutchie") {
-    return Promise.resolve({ ok: false, items: [], count: 0, parser: site });
+    return { ok: false, items: [], count: 0, parser: site };
   }
 
   clearBadges();
@@ -41,6 +41,11 @@ function runAnalyze(payload) {
   let items = [];
   try {
     items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+    // Dutchie menu can render after load; retry once after a short delay if no items
+    if (site === "dutchie" && items.length === 0) {
+      await new Promise((r) => setTimeout(r, 2000));
+      items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
+    }
   } catch (e) {
     if (DEBUG) console.warn("[DDD content] parse error", e);
   }
@@ -89,12 +94,12 @@ function runAnalyze(payload) {
     showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: (r.score.metricLabel || "") + " " + (r.score.metricValue != null ? r.score.metricValue : "") })));
   }
 
-  return Promise.resolve({
+  return {
     ok: true,
     items: scoredItems,
     count: scoredItems.length,
     parser: site,
-  });
+  };
 }
 
 function showSidebarModal(scoredItems) {
