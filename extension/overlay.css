@@ -1,4 +1,4 @@
-/* Daily Dispo Deals – Deal Checker overlay */
+/* Daily Dispo Deals – Deal Checker sidebar modal & badges */
 
 .ddd-badge {
   position: absolute;
@@ -26,34 +26,45 @@
   color: white;
 }
 
-/* Layered overlay: full-page layer with analytics */
-.ddd-overlay-backdrop {
+/* Sidebar modal: aligns with product list on the right */
+.ddd-sidebar-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.25);
   z-index: 2147483640;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  align-items: stretch;
+  justify-content: flex-end;
   box-sizing: border-box;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  animation: ddd-sidebar-backdrop-in 0.2s ease-out;
 }
 
-.ddd-overlay-sheet {
+.ddd-sidebar-modal {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
-  max-width: 480px;
-  width: 100%;
-  max-height: 85vh;
+  width: 360px;
+  max-width: 100%;
+  min-width: 280px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 2147483641;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  animation: ddd-sidebar-slide-in 0.25s ease-out;
 }
 
-.ddd-overlay-header {
+@keyframes ddd-sidebar-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ddd-sidebar-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.ddd-sidebar-header {
   padding: 16px 20px;
   border-bottom: 1px solid #e5e7eb;
   display: flex;
@@ -62,14 +73,14 @@
   flex-shrink: 0;
 }
 
-.ddd-overlay-title {
+.ddd-sidebar-title {
   font-size: 18px;
   font-weight: 600;
   color: #111827;
   margin: 0;
 }
 
-.ddd-overlay-close {
+.ddd-sidebar-close {
   background: none;
   border: none;
   padding: 6px;
@@ -80,12 +91,12 @@
   line-height: 1;
 }
 
-.ddd-overlay-close:hover {
+.ddd-sidebar-close:hover {
   background: #f3f4f6;
   color: #111827;
 }
 
-.ddd-overlay-summary {
+.ddd-sidebar-summary {
   padding: 12px 20px;
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
@@ -96,19 +107,19 @@
   color: #374151;
 }
 
-.ddd-overlay-summary span {
+.ddd-sidebar-summary span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.ddd-overlay-list {
+.ddd-sidebar-list {
   flex: 1;
   overflow: auto;
   padding: 12px 20px 20px;
 }
 
-.ddd-overlay-item {
+.ddd-sidebar-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -117,11 +128,11 @@
   font-size: 13px;
 }
 
-.ddd-overlay-item:last-child {
+.ddd-sidebar-item:last-child {
   border-bottom: none;
 }
 
-.ddd-overlay-item-badge {
+.ddd-sidebar-item-badge {
   flex-shrink: 0;
   padding: 2px 8px;
   border-radius: 6px;
@@ -129,22 +140,22 @@
   font-size: 12px;
 }
 
-.ddd-overlay-item-badge.ddd-worth { background: #0a7c42; color: #fff; }
-.ddd-overlay-item-badge.ddd-mid { background: #e67e22; color: #fff; }
-.ddd-overlay-item-badge.ddd-taxed { background: #c0392b; color: #fff; }
+.ddd-sidebar-item-badge.ddd-worth { background: #0a7c42; color: #fff; }
+.ddd-sidebar-item-badge.ddd-mid { background: #e67e22; color: #fff; }
+.ddd-sidebar-item-badge.ddd-taxed { background: #c0392b; color: #fff; }
 
-.ddd-overlay-item-info {
+.ddd-sidebar-item-info {
   flex: 1;
   min-width: 0;
 }
 
-.ddd-overlay-item-name {
+.ddd-sidebar-item-name {
   color: #111827;
   font-weight: 500;
   margin-bottom: 2px;
 }
 
-.ddd-overlay-item-metric {
+.ddd-sidebar-item-metric {
   color: #6b7280;
   font-size: 12px;
 }

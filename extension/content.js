@@ -83,7 +83,7 @@ function runAnalyze(payload) {
     }
   }
 
-  showLayeredOverlay(scoredItems);
+  showSidebarModal(scoredItems);
 
   if (panelItems.length > 0 || badgesPlaced === 0) {
     showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: (r.score.metricLabel || "") + " " + (r.score.metricValue != null ? r.score.metricValue : "") })));
@@ -97,8 +97,8 @@ function runAnalyze(payload) {
   });
 }
 
-function showLayeredOverlay(scoredItems) {
-  const existing = document.querySelector(".ddd-overlay-backdrop");
+function showSidebarModal(scoredItems) {
+  const existing = document.querySelector(".ddd-sidebar-backdrop");
   if (existing) existing.remove();
 
   const worth = scoredItems.filter((r) => r.score && r.score.badge === "worth").length;
@@ -106,52 +106,52 @@ function showLayeredOverlay(scoredItems) {
   const taxed = scoredItems.filter((r) => r.score && r.score.badge === "taxed").length;
 
   const backdrop = document.createElement("div");
-  backdrop.className = "ddd-overlay-backdrop";
+  backdrop.className = "ddd-sidebar-backdrop";
   backdrop.setAttribute("aria-label", "Deal Checker results");
 
-  const sheet = document.createElement("div");
-  sheet.className = "ddd-overlay-sheet";
+  const sidebar = document.createElement("div");
+  sidebar.className = "ddd-sidebar-modal";
 
   const header = document.createElement("div");
-  header.className = "ddd-overlay-header";
+  header.className = "ddd-sidebar-header";
   const titleEl = document.createElement("h2");
-  titleEl.className = "ddd-overlay-title";
+  titleEl.className = "ddd-sidebar-title";
   titleEl.textContent = "Deal Checker";
   const closeBtn = document.createElement("button");
-  closeBtn.id = "ddd-overlay-close-btn";
-  closeBtn.name = "ddd-overlay-close";
-  closeBtn.className = "ddd-overlay-close";
+  closeBtn.id = "ddd-sidebar-close-btn";
+  closeBtn.name = "ddd-sidebar-close";
+  closeBtn.className = "ddd-sidebar-close";
   closeBtn.type = "button";
   closeBtn.textContent = "×";
   closeBtn.setAttribute("aria-label", "Close");
   closeBtn.addEventListener("click", () => backdrop.remove());
   header.appendChild(titleEl);
   header.appendChild(closeBtn);
-  sheet.appendChild(header);
+  sidebar.appendChild(header);
 
   const summary = document.createElement("div");
-  summary.className = "ddd-overlay-summary";
+  summary.className = "ddd-sidebar-summary";
   summary.innerHTML =
     "<span>✅ Worth It: <strong>" + worth + "</strong></span>" +
     "<span>⚠️ Mid: <strong>" + mid + "</strong></span>" +
     "<span>❌ Taxed: <strong>" + taxed + "</strong></span>";
-  sheet.appendChild(summary);
+  sidebar.appendChild(summary);
 
   const list = document.createElement("div");
-  list.className = "ddd-overlay-list";
+  list.className = "ddd-sidebar-list";
   for (const row of scoredItems.slice(0, 25)) {
     const item = document.createElement("div");
-    item.className = "ddd-overlay-item";
+    item.className = "ddd-sidebar-item";
     const badge = document.createElement("span");
-    badge.className = "ddd-overlay-item-badge ddd-" + (row.score ? row.score.badge : "mid");
+    badge.className = "ddd-sidebar-item-badge ddd-" + (row.score ? row.score.badge : "mid");
     badge.textContent = row.score ? row.score.label : "⚠️ Mid";
     const info = document.createElement("div");
-    info.className = "ddd-overlay-item-info";
+    info.className = "ddd-sidebar-item-info";
     const nameEl = document.createElement("div");
-    nameEl.className = "ddd-overlay-item-name";
+    nameEl.className = "ddd-sidebar-item-name";
     nameEl.textContent = (row.name || "").trim() || "Product";
     const metricEl = document.createElement("div");
-    metricEl.className = "ddd-overlay-item-metric";
+    metricEl.className = "ddd-sidebar-item-metric";
     metricEl.textContent = row.score && row.score.metricLabel && row.score.metricValue != null ? row.score.metricLabel + " " + row.score.metricValue : "";
     info.appendChild(nameEl);
     info.appendChild(metricEl);
@@ -159,9 +159,9 @@ function showLayeredOverlay(scoredItems) {
     item.appendChild(info);
     list.appendChild(item);
   }
-  sheet.appendChild(list);
+  sidebar.appendChild(list);
 
-  backdrop.appendChild(sheet);
+  backdrop.appendChild(sidebar);
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) backdrop.remove();
   });
@@ -189,7 +189,7 @@ function showFloatingPanel(items) {
 }
 
 function clearBadges() {
-  document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-overlay-backdrop").forEach((el) => el.remove());
+  document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-sidebar-backdrop").forEach((el) => el.remove());
   document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
 }
 
