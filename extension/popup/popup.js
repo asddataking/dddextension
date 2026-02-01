@@ -82,10 +82,19 @@ document.getElementById("analyze").addEventListener("click", async () => {
   let target = { tabId: tab.id };
   if (site === "dutchie") {
     try {
-      const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
-      const dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
+      const isDutchiePoweredHost = url && !url.includes("dutchie.com");
+      let dutchieFrame = null;
+      for (let attempt = 0; attempt < (isDutchiePoweredHost ? 5 : 1); attempt++) {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+        dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
+        if (dutchieFrame) break;
+        if (isDutchiePoweredHost && attempt < 4) await new Promise((r) => setTimeout(r, 800));
+      }
       if (dutchieFrame && dutchieFrame.frameId !== 0) {
         target = { tabId: tab.id, frameIds: [dutchieFrame.frameId] };
+      } else if (dutchieFrame && dutchieFrame.frameId === 0) {
+        // Already on dutchie.com/embedded-menu in main frame
+        target = { tabId: tab.id };
       }
     } catch (_) {
       // Fall back to main frame

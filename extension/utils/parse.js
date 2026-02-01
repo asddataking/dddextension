@@ -169,6 +169,24 @@ function findWeedmapsCards(doc) {
 }
 
 /**
+ * Walk tree including shadow roots; call visit(node) for each node.
+ * @param {Node} root
+ * @param {(node: Node) => void} visit
+ */
+function walkWithShadow(root, visit) {
+  try {
+    visit(root);
+    if (root.nodeType === Node.ELEMENT_NODE) {
+      const el = /** @type {Element} */ (root);
+      if (el.shadowRoot) walkWithShadow(el.shadowRoot, visit);
+      for (let i = 0; i < root.childNodes.length; i++) {
+        walkWithShadow(root.childNodes[i], visit);
+      }
+    }
+  } catch (_) {}
+}
+
+/**
  * Generic: find elements containing price text by walking the DOM from text nodes.
  * @param {Document} doc
  * @returns {Array<{ container: Element, priceText: string, fullText: string }>}
@@ -176,13 +194,12 @@ function findWeedmapsCards(doc) {
 function findCardCandidatesGeneric(doc) {
   const candidates = [];
   if (!doc.body) return candidates;
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
   const priceNodes = [];
-  let n;
-  while ((n = walker.nextNode())) {
-    const text = n.textContent || "";
-    if (PRICE_REGEX.test(text) && /\d/.test(text)) priceNodes.push(n);
-  }
+  walkWithShadow(doc.body, (node) => {
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = (node.textContent || "").trim();
+    if (PRICE_REGEX.test(text) && /\d/.test(text)) priceNodes.push(node);
+  });
 
   const seen = new Set();
   for (const node of priceNodes) {
@@ -228,7 +245,8 @@ function findCardCandidatesGeneric(doc) {
  */
 function findDutchieCards(doc) {
   const candidates = [];
-  const root = doc.querySelector("main") || doc.body;
+  // Start from documentElement so we traverse into top-level shadow roots (e.g. body > app-host #shadow-root)
+  const root = doc.documentElement || doc.body;
   if (!root) return [];
 
   const hasWeightInText = (text) => {
@@ -245,7 +263,7 @@ function findDutchieCards(doc) {
     );
   };
 
-  // Traverse shadow DOM so we find product links inside Dutchie's custom elements
+  // Strategy 1: product links (traverse shadow DOM)
   const productLinks = findAllBySelector(
     root,
     'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"]'
@@ -276,6 +294,35 @@ function findDutchieCards(doc) {
         });
       }
       if (foundAny) break;
+      card = card.parentElement;
+      depth++;
+    }
+  }
+
+  if (candidates.length > 0) return candidates;
+
+  // Strategy 2: find any buttons with price + weight (e.g. "1g $12.00 Add to cart") and use their container as card
+  const allButtons = findAllBySelector(root, "button, [role='button']");
+  for (const btn of allButtons) {
+    const btnText = (btn.textContent || "").trim();
+    if (!PRICE_REGEX.test(btnText) || !hasWeightInText(btnText)) continue;
+    const priceMatch = btnText.match(PRICE_REGEX);
+    if (!priceMatch) continue;
+    let card = btn.closest("article") || btn.closest("[class*='product']") || btn.closest("[class*='card']") || btn.parentElement;
+    let depth = 0;
+    while (card && depth < 25) {
+      const text = (card.textContent || "").trim();
+      if (text.length >= 15 && text.length < 2000) {
+        const key = text.slice(0, 100);
+        if (!seen.has(key)) {
+          seen.add(key);
+          candidates.push({
+            container: card,
+            fullText: text,
+          });
+        }
+        break;
+      }
       card = card.parentElement;
       depth++;
     }
