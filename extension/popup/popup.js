@@ -30,19 +30,65 @@ function setOutputList(items) {
     el.textContent = "No items detected.";
     return;
   }
+  const trimName = (name) => {
+    const s = (name || "").trim() || "Product";
+    return s.length > 40 ? s.slice(0, 37) + "…" : s;
+  };
+  const formatMetric = (score) => {
+    if (!score || score.metricLabel == null || score.metricValue == null) return "";
+    const v = score.metricValue;
+    const val = Number(v) === Math.round(v) ? String(Math.round(v)) : v.toFixed(2);
+    if (score.metricLabel === "$/g") return "$" + val + "/g";
+    if (score.metricLabel === "$/100mg") return "$" + val + "/100mg";
+    return score.metricLabel + " " + val;
+  };
   const fragment = document.createDocumentFragment();
   for (const it of items.slice(0, 15)) {
     const div = document.createElement("div");
     div.className = "item";
     const score = it.score || {};
-    div.textContent = (score.label || "—") + " " + (it.name || "").trim() + (score.metricLabel && score.metricValue != null ? " — " + score.metricLabel + " " + score.metricValue : "");
+    const name = trimName(it.name);
+    const metric = score ? formatMetric(score) : "";
+    div.textContent = (score.label || "—") + " " + name + (metric ? " · " + metric : "");
     fragment.appendChild(div);
   }
   el.appendChild(fragment);
 }
 
-function setDebug(count, parser) {
-  document.getElementById("debug-content").textContent = "Items found: " + count + "\nParser: " + parser;
+function setDebug(count, parser, extra) {
+  document.getElementById("debug-content").textContent = "Items found: " + count + "\nParser: " + parser + (extra || "");
+}
+
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getCacheKey(url, site) {
+  try {
+    const u = new URL(url);
+    const normalized = u.origin + u.pathname.replace(/\/+$/, "") || u.origin + "/";
+    return "ddd_cache_" + site + "_" + normalized;
+  } catch (_) {
+    return "ddd_cache_" + site + "_" + url;
+  }
+}
+
+async function getCached(cacheKey) {
+  try {
+    const raw = await chrome.storage.local.get(cacheKey);
+    const entry = raw[cacheKey];
+    if (!entry || !entry.items || !Array.isArray(entry.items)) return null;
+    if (entry.timestamp && Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+    return { items: entry.items, site: entry.site || "dutchie" };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function setCached(cacheKey, data) {
+  try {
+    await chrome.storage.local.set({
+      [cacheKey]: { items: data.items, site: data.site, timestamp: Date.now() },
+    });
+  } catch (_) {}
 }
 
 document.getElementById("analyze").addEventListener("click", async () => {
@@ -57,6 +103,51 @@ document.getElementById("analyze").addEventListener("click", async () => {
   if (site !== "weedmaps" && site !== "dutchie") {
     setOutput("Unsupported site. Open a Weedmaps or Dutchie menu page.");
     setDebug(0, "unknown");
+    return;
+  }
+
+  const cacheKey = getCacheKey(url, site);
+  const cached = await getCached(cacheKey);
+  if (cached && cached.items && cached.items.length > 0) {
+    output.textContent = "Applying from cache…";
+    setDebug(cached.items.length, cached.site, "\n(cached)");
+    try {
+      let target = { tabId: tab.id };
+      if (site === "dutchie") {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
+        const dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
+        if (dutchieFrame && dutchieFrame.frameId !== 0) target = { tabId: tab.id, frameIds: [dutchieFrame.frameId] };
+      }
+      await chrome.scripting.executeScript({ target, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
+      await chrome.scripting.executeScript({ target, files: ["content.js"] });
+      await chrome.scripting.insertCSS({ target, files: ["overlay.css"] });
+      await chrome.scripting.executeScript({
+        target,
+        world: "ISOLATED",
+        func: (payload) => {
+          if (typeof window.__dddApplyFromCache === "function") return window.__dddApplyFromCache(payload);
+          return { ok: false };
+        },
+        args: [{ items: cached.items, site: cached.site }],
+      });
+      setOutputList(cached.items);
+      if (target.frameIds && target.frameIds[0] !== 0) {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+        await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["overlay.css"] });
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (payload) => {
+            if (typeof window.__dddShowSidebar === "function") window.__dddShowSidebar(payload);
+          },
+          args: [{ scoredItems: cached.items, site: cached.site }],
+        });
+      }
+      setDebug(cached.items.length, cached.site, "\n(cached)");
+    } catch (e) {
+      if (DEBUG) console.warn("[DDD popup] cache apply error", e);
+      setOutput("Cache apply failed, run Analyze again.");
+    }
     return;
   }
 
@@ -129,10 +220,16 @@ document.getElementById("analyze").addEventListener("click", async () => {
     }
   }
 
+  // Inject into target frame (main or Dutchie iframe). Scripts run in that frame's ISOLATED world.
+  // Inject content.js in a second call so it runs after stub and overwrites __dddRunAnalyze (avoids stub winning on some iframes).
   try {
     await chrome.scripting.executeScript({
       target,
-      files: ["utils/domains.js", "utils/parse.js", "utils/scoring.js", "content.js"],
+      files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"],
+    });
+    await chrome.scripting.executeScript({
+      target,
+      files: ["content.js"],
     });
     await chrome.scripting.insertCSS({
       target,
@@ -145,14 +242,24 @@ document.getElementById("analyze").addEventListener("click", async () => {
     return;
   }
 
-  // Run analyze in the tab (or Dutchie iframe) via executeScript.
+  // Run analyze in the same ISOLATED world where content.js defined __dddRunAnalyze (no MAIN world / script-tag path).
   try {
     const results = await chrome.scripting.executeScript({
       target,
-      func: (siteArg) => {
-        return typeof window.__dddRunAnalyze === "function"
-          ? window.__dddRunAnalyze({ site: siteArg })
-          : Promise.resolve({ ok: false, items: [], count: 0, parser: siteArg });
+      world: "ISOLATED",
+      func: async (siteArg) => {
+        const getBodyLen = () => (typeof document !== "undefined" && document.body ? (document.body.innerText || "").length : -1);
+        if (typeof window.__dddRunAnalyze === "function") {
+          return window.__dddRunAnalyze({ site: siteArg });
+        }
+        for (let w = 0; w < 75; w++) {
+          if (typeof window.__dddRunAnalyze === "function") break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (typeof window.__dddRunAnalyze === "function") {
+          return window.__dddRunAnalyze({ site: siteArg });
+        }
+        return Promise.resolve({ ok: false, items: [], count: 0, parser: siteArg, bodyTextLength: getBodyLen(), noRunAnalyze: true });
       },
       args: [site],
     });
@@ -164,11 +271,59 @@ document.getElementById("analyze").addEventListener("click", async () => {
     }
     const count = res.count ?? 0;
     const items = res.items || [];
-    setDebug(count, res.parser || site);
+    const parser = res.parser || site;
+    const debugParts = [];
+    if (count === 0 && res.noRunAnalyze) debugParts.push("(runAnalyze not found)");
+    if (count === 0 && res.stub) debugParts.push("(stub used – real script failed to load)");
+    if (count === 0 && res.loadError) debugParts.push("loadError: " + res.loadError);
+    if (count === 0 && res.parseDebug) debugParts.push("parseDebug: " + JSON.stringify(res.parseDebug));
+    if (count === 0 && res.bodyTextLength != null) debugParts.push("bodyTextLen: " + res.bodyTextLength);
+    const debugExtra = debugParts.length ? "\n" + debugParts.join("\n") : "";
+    setDebug(count, parser, debugExtra);
+    // #region agent log
+    if (count === 0) {
+      chrome.runtime.sendMessage({
+        type: "DDD_DEBUG_LOG",
+        payload: {
+          hypothesisId: "C",
+          location: "popup.js:after analyze",
+          message: "parseDebug from iframe",
+          data: { site, count, parseDebug: res.parseDebug ?? "missing" },
+        },
+      }).catch(() => {});
+    }
+    // #endregion
     if (count === 0) {
       setOutput("No items detected on this page.");
     } else {
       setOutputList(items);
+      await setCached(cacheKey, { items: res.items, site });
+      // Show sidebar in main frame so it stays fixed when user scrolls (Dutchie menu is in iframe).
+      if (target.frameIds && target.frameIds[0] !== 0 && res.items && res.items.length > 0) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"],
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"],
+          });
+          await chrome.scripting.insertCSS({
+            target: { tabId: tab.id },
+            files: ["overlay.css"],
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (payload) => {
+              if (typeof window.__dddShowSidebar === "function") window.__dddShowSidebar(payload);
+            },
+            args: [{ scoredItems: res.items, site }],
+          });
+        } catch (e) {
+          if (DEBUG) console.warn("[DDD popup] main frame sidebar error", e);
+        }
+      }
     }
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] run error", e);

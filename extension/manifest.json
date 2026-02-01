@@ -29,5 +29,11 @@
     "32": "icons/32.png",
     "48": "icons/48.png",
     "128": "icons/128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["utils/domains.js", "utils/parse.js", "utils/scoring.js", "utils/id.js", "content.js", "stub.js", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

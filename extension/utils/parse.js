@@ -30,6 +30,27 @@ const FRACTION_TO_GRAMS = { "1/8": 3.5, "1/4": 7, "1/2": 14, "¼": 3.5, "½": 14
  */
 
 /**
+ * Clean product display name: strip "Add X to cart", CTAs, collapse spaces.
+ * @param {string} s
+ * @param {number} [maxLen]
+ * @returns {string}
+ */
+function cleanProductName(s, maxLen) {
+  if (!s || typeof s !== "string") return "";
+  let t = s
+    .replace(/\s*Add\s+[\d./\s]*(?:g|oz|ounce)?\s*to\s+cart\s*/gi, " ")
+    .replace(/\s*Add\s+to\s+cart\s*/gi, " ")
+    .replace(/\s*Add\s+[\w\s]*to\s+cart\s*/gi, " ")
+    .replace(/\s*product\s*$/i, " ")
+    .replace(/\$\d+(?:\.\d+)?\s*\d+%\s*off\s*/gi, " ")
+    .replace(/\s*\$\d+(?:\.\d+)?\s*/g, " ")
+    .replace(/\s*\d+%\s*off\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (maxLen != null ? t.slice(0, maxLen) : t) || "";
+}
+
+/**
  * Simple hash for stable id from name+price+weight text.
  * @param {string} s
  * @returns {string}
@@ -60,6 +81,64 @@ function inferProductType(text, weightGrams, mgTotal) {
   if (weightGrams != null && weightGrams > 0) return "flower";
   if (/\b(flower|eighth|quarter|half|oz)\b/.test(t)) return "flower";
   return "other";
+}
+
+/**
+ * Infer strain type from text (indica / sativa / hybrid).
+ * @param {string} text
+ * @returns {"indica"|"sativa"|"hybrid"|null}
+ */
+function inferStrainType(text) {
+  if (!text || typeof text !== "string") return null;
+  const t = text.toLowerCase();
+  if (/\bhybrid\b/.test(t) || /\bindica-hybrid\b/.test(t) || /\bsativa-hybrid\b/.test(t)) return "hybrid";
+  if (/\bindica\b/.test(t)) return "indica";
+  if (/\bsativa\b/.test(t)) return "sativa";
+  return null;
+}
+
+/**
+ * True if flower is sold bulk/deli style (by weight) vs pre-packaged.
+ * @param {string} fullText
+ * @param {string} productType
+ * @returns {boolean}
+ */
+function isBulkFlower(fullText, productType) {
+  if (productType !== "flower") return false;
+  const t = (fullText || "").toLowerCase();
+  return /\b(bulk|deli)\b/.test(t) || /bulk\s*flower/.test(t);
+}
+
+/** Patterns that indicate a listing is not single-product flower (bundles, packs, promos). */
+const NON_FLOWER_PATTERNS = [
+  /\bbundle\b/i,
+  /\bvariety\s*pack\b/i,
+  /\bdeal\s*pack\b/i,
+  /\bmix\s*and\s*match\b/i,
+  /\bbuild\s*your\s*own\b/i,
+  /\bstarter\s*pack\b/i,
+  /\bsample\s*pack\b/i,
+  /\bgift\s*(set|box|pack)\b/i,
+  /\bcombo\s*pack\b/i,
+  /\bmulti\s*pack\b/i,
+  /\bvalue\s*pack\b/i,
+  /\bpromo\s*pack\b/i,
+  /\bspecials?\s*bundle\b/i,
+];
+
+/**
+ * True if this item looks like a bundle/pack/promo rather than a single flower product.
+ * @param {string} name
+ * @param {string} fullText
+ * @param {string} productType
+ * @returns {boolean}
+ */
+function isLikelyNonFlower(name, fullText, productType) {
+  const combined = ((name || "") + " " + (fullText || "")).toLowerCase();
+  for (const re of NON_FLOWER_PATTERNS) {
+    if (re.test(combined)) return true;
+  }
+  return false;
 }
 
 /**
@@ -193,9 +272,10 @@ function walkWithShadow(root, visit) {
  */
 function findCardCandidatesGeneric(doc) {
   const candidates = [];
-  if (!doc.body) return candidates;
+  const root = doc.body || doc.documentElement;
+  if (!root) return candidates;
   const priceNodes = [];
-  walkWithShadow(doc.body, (node) => {
+  walkWithShadow(root, (node) => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     const text = (node.textContent || "").trim();
     if (PRICE_REGEX.test(text) && /\d/.test(text)) priceNodes.push(node);
@@ -205,10 +285,10 @@ function findCardCandidatesGeneric(doc) {
   for (const node of priceNodes) {
     let el = node.parentElement;
     let depth = 0;
-    const maxDepth = 15;
+    const maxDepth = 20;
     while (el && depth < maxDepth) {
       const text = (el.textContent || "").trim();
-      if (text.length < 10) {
+      if (text.length < 6) {
         el = el.parentElement;
         depth++;
         continue;
@@ -250,8 +330,8 @@ function findDutchieCards(doc) {
     if (typeof window !== "undefined") window.__dddParseDebug = window.__dddParseDebug || {};
   } catch (_) {}
   // #endregion
-  // Start from documentElement so we traverse into top-level shadow roots (e.g. body > app-host #shadow-root)
-  const root = doc.documentElement || doc.body;
+  // Start from body so we traverse into shadow roots (documentElement can miss or include head)
+  const root = doc.body || doc.documentElement;
   if (!root) return [];
 
   const hasWeightInText = (text) => {
@@ -268,10 +348,10 @@ function findDutchieCards(doc) {
     );
   };
 
-  // Strategy 1: product links (traverse shadow DOM)
+  // Strategy 1: product links (traverse shadow DOM); match /product/ or path containing "product" (e.g. /products/.../product/...)
   const productLinks = findAllBySelector(
     root,
-    'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"]'
+    'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"], a[href*="product"]'
   );
   // #region agent log
   try {
@@ -378,7 +458,9 @@ function findCardCandidates(doc, site) {
     if (dutchieCards.length > 0) {
       return dutchieCards.map((c) => ({ container: c.container, priceText: (c.fullText.match(PRICE_REGEX) || [""])[0], fullText: c.fullText }));
     }
-    return findCardCandidatesGeneric(doc);
+    const genericFirst = findCardCandidatesGeneric(doc);
+    if (genericFirst.length > 0) return genericFirst;
+    return [];
   }
   return findCardCandidatesGeneric(doc);
 }
@@ -402,6 +484,7 @@ function parseItemsFromDOM(site) {
     const items = [];
     const usedIds = new Set();
     const usedContainers = new Set();
+    let itemIndex = 0;
 
     for (let i = 0; i < candidates.length; i++) {
       const { container, fullText } = candidates[i];
@@ -420,29 +503,43 @@ function parseItemsFromDOM(site) {
       if (site === "weedmaps") {
         const productLink = container.querySelector('a[href*="/menu/"]');
         if (productLink) {
-          name = (productLink.textContent || "").replace(/\s*product detail page\s*/i, "").trim().slice(0, 120);
+          name = cleanProductName((productLink.textContent || "").replace(/\s*product detail page\s*/i, ""), 80);
         }
       }
       if (site === "dutchie") {
-        const productLink = container.querySelector('a[href*="/product/"]');
+        const card = container.closest("article") || container.closest("[class*='product']") || container.closest("[class*='card']") || container;
+        const productLink = card.querySelector('a[href*="/product/"]');
         if (productLink) {
-          name = (productLink.textContent || "").replace(/\s*product\s*$/i, "").trim().slice(0, 120);
+          const raw = (productLink.textContent || "").replace(/\s*product\s*$/i, "").trim();
+          if (raw && !/^all\s+flower\s*[\d/]?\s*(oz|g)?$/i.test(raw)) {
+            name = cleanProductName(raw, 80);
+          }
+        }
+        if (!name && fullText) {
+          const firstLine = fullText.split(/\n/)[0]?.trim() || fullText.slice(0, 80);
+          const cleaned = cleanProductName(firstLine.replace(PRICE_REGEX, ""), 80);
+          if (cleaned && !/^all\s+flower\s*[\d/]?\s*(oz|g)?$/i.test(cleaned)) name = cleaned;
         }
       }
       if (!name) {
         const firstLine = fullText.split(/\n/)[0]?.trim() || fullText.slice(0, 80);
-        name = firstLine.replace(PRICE_REGEX, "").trim().slice(0, 120) || "Product " + (i + 1);
+        name = cleanProductName(firstLine.replace(PRICE_REGEX, ""), 80) || "Product " + (i + 1);
       }
+      if (isLikelyNonFlower(name, fullText, productType)) continue;
       const idSource = name + price + (weightGrams ?? "") + (mgTotal ?? "");
       const id = simpleHash(idSource);
       if (usedIds.has(id)) continue;
       usedIds.add(id);
 
-      const dataId = "ddd-item-" + i;
+      const dataId = "ddd-item-" + itemIndex;
+      itemIndex++;
       try {
         container.setAttribute("data-ddd-id", dataId);
       } catch (_) {}
       const nodeSelector = "[data-ddd-id=\"" + dataId + "\"]";
+      const combinedNameText = (name + " " + fullText).trim();
+      const strainType = inferStrainType(combinedNameText);
+      const bulkFlower = isBulkFlower(fullText, productType);
 
       items.push({
         id,
@@ -453,6 +550,8 @@ function parseItemsFromDOM(site) {
         mgTotal: mgTotal ?? undefined,
         rawText: fullText.slice(0, 300),
         nodeSelector,
+        strainType: strainType ?? undefined,
+        isBulkFlower: productType === "flower" ? bulkFlower : undefined,
       });
     }
 
