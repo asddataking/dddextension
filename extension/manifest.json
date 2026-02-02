@@ -33,7 +33,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["utils/domains.js", "utils/parse.js", "utils/scoring.js", "utils/id.js", "content.js", "stub.js", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"],
+      "resources": ["utils/domains.js", "utils/parse.js", "utils/scoring.js", "utils/id.js", "content.js", "stub.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js", "icons/16.png", "icons/32.png", "icons/48.png", "icons/128.png"],
       "matches": ["<all_urls>"]
     }
   ]

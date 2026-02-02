@@ -34,6 +34,20 @@ function doV2IngestFetch(ingestPayload, installId) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "DDD_GET_LOGO") {
+    const url = chrome.runtime.getURL("icons/32.png");
+    fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => {
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const b64 = btoa(binary);
+        sendResponse({ logoDataUrl: "data:image/png;base64," + b64 });
+      })
+      .catch(() => sendResponse({ logoDataUrl: null }));
+    return true;
+  }
   if (msg.type === "DDD_DEBUG_LOG" && msg.payload) {
     fetch(DDD_DEBUG_INGEST, {
       method: "POST",

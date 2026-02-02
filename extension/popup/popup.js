@@ -118,7 +118,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
         const dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
         if (dutchieFrame && dutchieFrame.frameId !== 0) target = { tabId: tab.id, frameIds: [dutchieFrame.frameId] };
       }
-      await chrome.scripting.executeScript({ target, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
+      await chrome.scripting.executeScript({ target, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"] });
       await chrome.scripting.executeScript({ target, files: ["content.js"] });
       await chrome.scripting.insertCSS({ target, files: ["overlay.css"] });
       const applyResult = await chrome.scripting.executeScript({
@@ -141,7 +141,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
           func: (payload) => {
             if (typeof window.__dddShowSidebar === "function") window.__dddShowSidebar(payload);
           },
-          args: [{ scoredItems: cached.items, site: cached.site }],
+          args: [{ scoredItems: cached.items, site: cached.site, pageUrl: tab.url || "" }],
         });
       }
       if (typeof triggerV2Ingest === "function") {
@@ -230,7 +230,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
   try {
     await chrome.scripting.executeScript({
       target,
-      files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"],
+      files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"],
     });
     await chrome.scripting.executeScript({
       target,
@@ -309,7 +309,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
         try {
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"],
+            files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"],
           });
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
@@ -324,7 +324,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
             func: (payload) => {
               if (typeof window.__dddShowSidebar === "function") window.__dddShowSidebar(payload);
             },
-            args: [{ scoredItems: res.items, site }],
+            args: [{ scoredItems: res.items, site, pageUrl: tab.url || "" }],
           });
         } catch (e) {
           if (DEBUG) console.warn("[DDD popup] main frame sidebar error", e);

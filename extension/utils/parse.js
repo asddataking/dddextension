@@ -75,11 +75,13 @@ function simpleHash(s) {
 function inferProductType(text, weightGrams, mgTotal) {
   const t = text.toLowerCase();
   if (mgTotal != null && mgTotal > 0) return "edible";
-  if (/\b(cartridge|cart|vape|pen)\b/.test(t)) return "vape";
   if (/\b(concentrate|wax|shatter|live resin|rosin)\b/.test(t)) return "concentrate";
   if (/\b(preroll|pre-roll|joint)\b/.test(t)) return "preroll";
   if (weightGrams != null && weightGrams > 0) return "flower";
   if (/\b(flower|eighth|quarter|half|oz)\b/.test(t)) return "flower";
+  if (/\b(indica|sativa|hybrid)\b/.test(t)) return "flower";
+  if (/\b(cartridge|cart)\b/.test(t)) return "vape";
+  if (WEIGHT_GRAM_REGEX.test(t) || WEIGHT_FRAC_REGEX.test(t) || OZ_REGEX.test(t)) return "flower";
   return "other";
 }
 

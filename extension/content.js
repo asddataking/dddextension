@@ -339,7 +339,8 @@ async function runAnalyze(payload) {
   const isInIframe = typeof window !== "undefined" && window.self !== window.top;
   const skipSidebarInIframe = isInIframe && site === "dutchie";
   if (!skipSidebarInIframe) {
-    showSidebarModal(scoredItems, site);
+    const pageUrl = typeof document !== "undefined" && document.location ? document.location.href : "";
+    showSidebarModal(scoredItems, site, pageUrl);
   }
   if (panelItems.length > 0 || badgesPlaced === 0) {
     showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: formatMetric(r.score) })));
@@ -357,7 +358,7 @@ async function runAnalyze(payload) {
   };
 }
 
-function showSidebarModal(scoredItems, site) {
+function showSidebarModal(scoredItems, site, pageUrl) {
   const existing = document.querySelector(".ddd-sidebar-backdrop");
   if (existing) existing.remove();
 
@@ -366,13 +367,21 @@ function showSidebarModal(scoredItems, site) {
   const mid = scoredItems.filter((r) => r.score && r.score.badge === "mid").length;
   const taxed = scoredItems.filter((r) => r.score && r.score.badge === "taxed").length;
 
+  let v2Status = "Idle";
+  const hostname = (() => { try { return new URL(pageUrl || "").hostname || ""; } catch (_) { return ""; } })();
+  const baseList = scoredItems.slice(0, 100);
+  const listItemsWithRef = baseList.map((r, i) => ({
+    ...r,
+    client_ref: typeof makeClientRef === "function" ? makeClientRef(r, i, hostname) : "ddd-" + i,
+  }));
+
   const backdrop = document.createElement("div");
   backdrop.className = "ddd-sidebar-backdrop ddd-site-" + siteTheme;
   backdrop.setAttribute("aria-label", "Daily Dispo Deals");
   backdrop.setAttribute("data-ddd-site", siteTheme);
 
   const sidebar = document.createElement("div");
-  sidebar.className = "ddd-sidebar-modal ddd-sidebar-collapsed ddd-site-" + siteTheme;
+  sidebar.className = "ddd-sidebar-modal ddd-root ddd-sidebar-collapsed ddd-site-" + siteTheme;
 
   const header = document.createElement("div");
   header.className = "ddd-sidebar-header";
@@ -380,53 +389,64 @@ function showSidebarModal(scoredItems, site) {
   headerLeft.className = "ddd-sidebar-header-left";
   const logoImg = document.createElement("img");
   logoImg.className = "ddd-sidebar-logo";
-  const logoUrl = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL ? chrome.runtime.getURL("icons/32.png") : "";
-  logoImg.src = logoUrl;
   logoImg.alt = "";
   logoImg.setAttribute("width", "24");
   logoImg.setAttribute("height", "24");
-  logoImg.referrerPolicy = "no-referrer";
   logoImg.onerror = function () { this.style.visibility = "hidden"; this.style.width = "0"; this.style.height = "0"; this.style.margin = "0"; this.style.padding = "0"; };
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({ type: "DDD_GET_LOGO" }, (r) => {
+      if (r && r.logoDataUrl) logoImg.src = r.logoDataUrl;
+    });
+  }
   const titleWrap = document.createElement("div");
   titleWrap.className = "ddd-sidebar-title-wrap";
   const titleEl = document.createElement("h2");
   titleEl.className = "ddd-sidebar-title";
-  titleEl.textContent = "Deal Checker – Daily Dispo Deals";
-  titleWrap.appendChild(titleEl);
+  titleEl.textContent = "DDD Checker";
   headerLeft.appendChild(logoImg);
+  titleWrap.appendChild(titleEl);
   headerLeft.appendChild(titleWrap);
-  const themeBtn = document.createElement("button");
-  themeBtn.type = "button";
-  themeBtn.className = "ddd-sidebar-theme-btn";
-  themeBtn.setAttribute("aria-label", "Toggle dark mode");
-  themeBtn.innerHTML = "☀";
-  const applyTheme = (isDark) => {
-    if (isDark) {
-      backdrop.classList.add("ddd-theme-dark");
-      sidebar.classList.add("ddd-theme-dark");
-      themeBtn.innerHTML = "☾";
-      themeBtn.setAttribute("aria-label", "Switch to light mode");
-    } else {
-      backdrop.classList.remove("ddd-theme-dark");
-      sidebar.classList.remove("ddd-theme-dark");
-      themeBtn.innerHTML = "☀";
-      themeBtn.setAttribute("aria-label", "Switch to dark mode");
+  const builtIn = document.createElement("div");
+  builtIn.className = "ddd-sidebar-built-in";
+  builtIn.textContent = "Built in Michigan";
+  headerLeft.appendChild(builtIn);
+
+  const statusWrap = document.createElement("div");
+  statusWrap.className = "ddd-sidebar-status-wrap";
+  const statusDot = document.createElement("span");
+  statusDot.className = "ddd-sidebar-status-dot ddd-status-synced";
+  const statusLabel = document.createElement("span");
+  statusLabel.className = "ddd-sidebar-status-label";
+  statusLabel.textContent = "Synced";
+  statusWrap.appendChild(statusDot);
+  statusWrap.appendChild(statusLabel);
+
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.className = "ddd-sidebar-retry-btn";
+  retryBtn.textContent = "Retry";
+  retryBtn.style.display = "none";
+  retryBtn.addEventListener("click", () => {
+    if (typeof triggerV2Ingest === "function" && typeof chrome !== "undefined" && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs[0];
+        if (tab && tab.id) triggerV2Ingest(tab.id, site, scoredItems, pageUrl || "");
+      });
+    } else if (typeof mapToIngestPayload === "function" && typeof getOrCreateInstallId === "function") {
+      getOrCreateInstallId().then((installId) => {
+        const payload = mapToIngestPayload(site, scoredItems, pageUrl || "");
+        chrome.runtime.sendMessage({ type: "DDD_V2_INGEST", payload: { ingestPayload: payload, installId } }, (r) => {
+          if (r && r.ok && r.normalized) {
+            updateV2Status("Normalized ✓");
+            if (typeof window.__dddUpdateV2Normalized === "function") window.__dddUpdateV2Normalized(r.normalized);
+          } else {
+            updateV2Status("Failed");
+          }
+        });
+      }).catch(() => updateV2Status("Failed"));
     }
-  };
-  try {
-    chrome.storage.local.get("ddd_theme", (st) => {
-      const isDark = st && st.ddd_theme === "dark";
-      applyTheme(!!isDark);
-    });
-  } catch (_) {
-    applyTheme(false);
-  }
-  themeBtn.addEventListener("click", () => {
-    const isDark = backdrop.classList.toggle("ddd-theme-dark");
-    sidebar.classList.toggle("ddd-theme-dark", isDark);
-    applyTheme(isDark);
-    try { chrome.storage.local.set({ ddd_theme: isDark ? "dark" : "light" }); } catch (_) {}
   });
+
   const closeBtn = document.createElement("button");
   closeBtn.id = "ddd-sidebar-close-btn";
   closeBtn.name = "ddd-sidebar-close";
@@ -435,17 +455,20 @@ function showSidebarModal(scoredItems, site) {
   closeBtn.textContent = "×";
   closeBtn.setAttribute("aria-label", "Close");
   closeBtn.addEventListener("click", () => backdrop.remove());
+
   const expandTab = document.createElement("button");
   expandTab.type = "button";
   expandTab.className = "ddd-sidebar-expand-tab";
   expandTab.setAttribute("aria-label", "Open Daily Dispo Deals");
-  expandTab.innerHTML = "<span class=\"ddd-sidebar-tab-text\">Daily Dispo Deals</span><span class=\"ddd-sidebar-tab-counts\">" + worth + " / " + mid + " / " + taxed + "</span>";
+  expandTab.innerHTML = "<span class=\"ddd-sidebar-tab-text\">DDD Checker</span><span class=\"ddd-sidebar-tab-counts\">" + worth + " / " + mid + " / " + taxed + "</span>";
   expandTab.addEventListener("click", (e) => {
     e.stopPropagation();
     sidebar.classList.remove("ddd-sidebar-collapsed");
   });
+
   header.appendChild(headerLeft);
-  header.appendChild(themeBtn);
+  header.appendChild(statusWrap);
+  header.appendChild(retryBtn);
   header.appendChild(closeBtn);
   header.appendChild(expandTab);
   sidebar.appendChild(header);
@@ -461,24 +484,18 @@ function showSidebarModal(scoredItems, site) {
   const summaryWrap = document.createElement("div");
   summaryWrap.className = "ddd-sidebar-summary-wrap";
   const summary = document.createElement("div");
-  summary.className = "ddd-sidebar-summary";
+  summary.className = "ddd-sidebar-summary-pills";
   summary.innerHTML =
-    "<div class=\"ddd-sidebar-summary-card ddd-summary-worth\">✅<span class=\"ddd-sidebar-summary-num\">" + worth + "</span></div>" +
-    "<div class=\"ddd-sidebar-summary-card ddd-summary-mid\">⚠️<span class=\"ddd-sidebar-summary-num\">" + mid + "</span></div>" +
-    "<div class=\"ddd-sidebar-summary-card ddd-summary-taxed\">❌<span class=\"ddd-sidebar-summary-num\">" + taxed + "</span></div>";
+    "<div class=\"ddd-sidebar-pill ddd-pill-worth\"><span class=\"ddd-pill-icon\">✓</span> Worth · <span class=\"ddd-pill-num\">" + worth + "</span></div>" +
+    "<div class=\"ddd-sidebar-pill ddd-pill-mid\"><span class=\"ddd-pill-icon\">!</span> Mid · <span class=\"ddd-pill-num\">" + mid + "</span></div>" +
+    "<div class=\"ddd-sidebar-pill ddd-pill-taxed\"><span class=\"ddd-pill-icon\">✕</span> Taxed · <span class=\"ddd-pill-num\">" + taxed + "</span></div>";
   summaryWrap.appendChild(summary);
   const infoWrap = document.createElement("div");
   infoWrap.className = "ddd-sidebar-info-wrap";
   const infoContent = document.createElement("div");
   infoContent.className = "ddd-sidebar-info-content";
   infoContent.innerHTML = "<p class=\"ddd-sidebar-info-line\">Menu scored by value</p><p class=\"ddd-sidebar-info-line\">" + scoredItems.length + " items</p>";
-  infoWrap.appendChild(infoContent);
   summaryWrap.appendChild(infoWrap);
-  const v2StatusEl = document.createElement("div");
-  v2StatusEl.className = "ddd-sidebar-v2-status";
-  v2StatusEl.setAttribute("aria-live", "polite");
-  v2StatusEl.textContent = "DDD Sync: Idle";
-  summaryWrap.appendChild(v2StatusEl);
   const v2NormalizedWrap = document.createElement("div");
   v2NormalizedWrap.className = "ddd-sidebar-v2-normalized";
   v2NormalizedWrap.style.display = "none";
@@ -493,7 +510,13 @@ function showSidebarModal(scoredItems, site) {
   sidebarScroll.appendChild(summaryWrap);
 
   const updateV2Status = (status) => {
-    v2StatusEl.textContent = "DDD Sync: " + (status || "Idle");
+    v2Status = status || "Idle";
+    const s = String(v2Status);
+    const isSending = s.indexOf("Sending") >= 0;
+    const isFailed = s.indexOf("Failed") >= 0;
+    statusLabel.textContent = isSending ? "Sending…" : isFailed ? "Failed" : "Synced";
+    statusDot.className = "ddd-sidebar-status-dot " + (isSending ? "ddd-status-sending" : isFailed ? "ddd-status-failed" : "ddd-status-synced");
+    retryBtn.style.display = isFailed ? "inline-block" : "none";
   };
   const updateV2Normalized = (data) => {
     v2NormalizedContent.innerHTML = "";
@@ -528,7 +551,8 @@ function showSidebarModal(scoredItems, site) {
   }
 
   const displayName = (name) => {
-    const s = (name || "").trim() || "Product";
+    let s = (name || "").trim() || "Product";
+    s = s.replace(/\b(bulk[- ]?flower|pre[- ]?packaged|pre[- ]?pack|hybrid|indica|sativa)\b/gi, "").replace(/\s{2,}/g, " ").trim();
     return s.length > 56 ? s.slice(0, 53) + "…" : s;
   };
   const formatMetric = (score) => {
@@ -540,22 +564,83 @@ function showSidebarModal(scoredItems, site) {
     return score.metricLabel + " " + val;
   };
 
-  const maxListItems = 100;
-  const listItems = scoredItems.slice(0, maxListItems);
   const DEALS_PER_PAGE = 6;
-  const totalPages = Math.max(1, Math.ceil(listItems.length / DEALS_PER_PAGE));
+  let categoryFilter = "All";
+  const CATEGORIES = ["All", "flower", "concentrate", "edible", "vape", "preroll", "other"];
+  const categoryDisplayLabel = (cat) => {
+    if (cat === "All") return "All";
+    const labels = { flower: "Flower", concentrate: "Concentrate", edible: "Edible", vape: "Vape", preroll: "Pre-Roll", other: "Other" };
+    return labels[cat] || (cat ? cat.charAt(0).toUpperCase() + cat.slice(1) : "Other");
+  };
+  let listItems = listItemsWithRef;
+  let totalPages = Math.max(1, Math.ceil(listItems.length / DEALS_PER_PAGE));
   let currentPage = 1;
+
+  const applyFilter = () => {
+    listItems = categoryFilter === "All"
+      ? listItemsWithRef
+      : listItemsWithRef.filter((r) => (r.productType || "other") === categoryFilter);
+    totalPages = Math.max(1, Math.ceil(listItems.length / DEALS_PER_PAGE));
+    currentPage = Math.min(currentPage, totalPages);
+  };
 
   const list = document.createElement("div");
   list.className = "ddd-sidebar-list";
   list.setAttribute("data-ddd-list", "true");
+  const listHeader = document.createElement("div");
+  listHeader.className = "ddd-sidebar-list-header";
   const listTitle = document.createElement("div");
   listTitle.className = "ddd-sidebar-list-title";
-  listTitle.textContent = "Deals";
-  list.appendChild(listTitle);
+  listTitle.textContent = "DEALS ";
+  const listSortIndicator = document.createElement("span");
+  listSortIndicator.className = "ddd-sidebar-list-sort";
+  listSortIndicator.innerHTML = "I/S/H- <span class=\"ddd-sidebar-sort-arrow\">▲</span>";
+  listTitle.appendChild(listSortIndicator);
+  const filterBtn = document.createElement("button");
+  filterBtn.type = "button";
+  filterBtn.className = "ddd-sidebar-filter-btn";
+  const updateFilterBtnLabel = () => {
+    filterBtn.textContent = categoryFilter === "All" ? "Filters" : categoryDisplayLabel(categoryFilter);
+  };
+  updateFilterBtnLabel();
+  const filterDropdown = document.createElement("div");
+  filterDropdown.className = "ddd-sidebar-filter-dropdown";
+  filterDropdown.style.display = "none";
+  CATEGORIES.forEach((cat) => {
+    const opt = document.createElement("button");
+    opt.type = "button";
+    opt.className = "ddd-sidebar-filter-opt" + (categoryFilter === cat ? " ddd-filter-active" : "");
+    opt.textContent = categoryDisplayLabel(cat);
+    opt.addEventListener("click", () => {
+      categoryFilter = cat;
+      filterDropdown.querySelectorAll(".ddd-sidebar-filter-opt").forEach((o) => o.classList.remove("ddd-filter-active"));
+      opt.classList.add("ddd-filter-active");
+      filterDropdown.style.display = "none";
+      updateFilterBtnLabel();
+      applyFilter();
+      renderPage(currentPage);
+    });
+    filterDropdown.appendChild(opt);
+  });
+  const closeFilter = (e) => {
+    if (!filterBtn.contains(e.target) && !filterDropdown.contains(e.target)) {
+      filterDropdown.style.display = "none";
+      document.removeEventListener("click", closeFilter);
+    }
+  };
+  filterBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = filterDropdown.style.display === "block";
+    filterDropdown.style.display = isOpen ? "none" : "block";
+    if (!isOpen) setTimeout(() => document.addEventListener("click", closeFilter), 0);
+  });
+  listHeader.appendChild(listTitle);
+  listHeader.appendChild(filterBtn);
+  listHeader.appendChild(filterDropdown);
+  list.appendChild(listHeader);
   const listKey = document.createElement("div");
   listKey.className = "ddd-sidebar-list-key";
-  listKey.innerHTML = "<span class=\"ddd-key-strain\">I/S/H</span> · <span class=\"ddd-key-deli\" title=\"by weight\">⚖</span> <span class=\"ddd-key-prepack\" title=\"sealed\">▫</span>";
+  listKey.innerHTML = "<span class=\"ddd-key-strain\" title=\"Indica / Sativa / Hybrid\">I/S/H</span> · <span class=\"ddd-key-bulk\" title=\"Bulk by weight\">⚖</span> <span class=\"ddd-key-prepack\" title=\"Pre-packed sealed\">▫</span>";
   list.appendChild(listKey);
   const listInner = document.createElement("div");
   listInner.className = "ddd-sidebar-list-inner";
@@ -580,80 +665,100 @@ function showSidebarModal(scoredItems, site) {
   pageControls.appendChild(nextBtn);
   list.appendChild(pageControls);
 
-  const addAdSlot = (type, label, placeholder) => {
-    const item = document.createElement("div");
-    item.className = "ddd-sidebar-item ddd-sidebar-item-ad ddd-sidebar-item-ad-" + type;
-    item.setAttribute("data-ddd-ad-slot", type);
-    const badge = document.createElement("span");
-    badge.className = "ddd-sidebar-item-badge ddd-sidebar-ad-badge";
-    badge.textContent = label;
-    const info = document.createElement("div");
-    info.className = "ddd-sidebar-item-info";
-    const nameEl = document.createElement("div");
-    nameEl.className = "ddd-sidebar-item-name ddd-sidebar-ad-placeholder-text";
-    nameEl.textContent = placeholder;
-    info.appendChild(nameEl);
-    item.appendChild(badge);
-    item.appendChild(info);
-    listInner.appendChild(item);
-  };
+  let overlayMap = {};
+  try {
+    chrome.storage.local.get("ddd_overlay_map_v1", (r) => {
+      overlayMap = (r && r.ddd_overlay_map_v1) || {};
+      renderPage(currentPage);
+    });
+  } catch (_) {}
 
-  const strainLabel = (strain) => (strain === "indica" ? "I" : strain === "sativa" ? "S" : strain === "hybrid" ? "H" : null);
-  const styleSymbol = (row) => {
-    if (row.productType !== "flower") return null;
-    return row.isBulkFlower === true ? "⚖" : "▫";
-  };
+  const strainBadge = (strain) => (strain === "indica" ? "I" : strain === "sativa" ? "S" : strain === "hybrid" ? "H" : null);
 
   const renderPage = (page) => {
     listInner.innerHTML = "";
     const start = (page - 1) * DEALS_PER_PAGE;
     const end = Math.min(start + DEALS_PER_PAGE, listItems.length);
+    const debugOverlay = typeof DEBUG_OVERLAY !== "undefined" && DEBUG_OVERLAY;
     for (let i = start; i < end; i++) {
       const row = listItems[i];
+      const overlay = overlayMap[row.client_ref] || (debugOverlay && i === start ? { title: row.name, confidence: 0.8 } : null);
+      const hasOverlay = !!(overlay && (overlay.confidence >= 0.7 || debugOverlay));
+      const displayTitle = (hasOverlay && overlay && overlay.title) ? overlay.title : displayName(row.name);
       const item = document.createElement("div");
-      item.className = "ddd-sidebar-item ddd-item-" + (row.score ? row.score.badge : "mid");
+      item.className = "ddd-sidebar-item ddd-item-" + (row.score ? row.score.badge : "mid") + (hasOverlay ? " has-overlay" : "");
       item.setAttribute("data-ddd-item-index", String(i));
+      item.style.setProperty("--i", String(i - start));
+      const badgeLabel = (b) => (b === "worth" ? "Worth it" : b === "mid" ? "Mid" : b === "taxed" ? "Taxed" : "Mid");
+      const metricTextForBadge = row.score ? formatMetric(row.score) : "";
       const topRow = document.createElement("div");
       topRow.className = "ddd-sidebar-item-top";
       const badge = document.createElement("span");
-      badge.className = "ddd-sidebar-item-badge ddd-" + (row.score ? row.score.badge : "mid");
-      badge.textContent = row.score ? row.score.label : "⚠️ Mid";
+      badge.className = "ddd-sidebar-item-badge ddd-value-pill ddd-" + (row.score ? row.score.badge : "mid");
+      const badgeIcon = (b) => (b === "worth" ? "✓ " : b === "mid" ? "! " : b === "taxed" ? "✕ " : "! ");
+      badge.textContent = badgeIcon(row.score ? row.score.badge : "mid") + badgeLabel(row.score ? row.score.badge : "mid");
       topRow.appendChild(badge);
-      const tags = document.createElement("div");
-      tags.className = "ddd-sidebar-item-tags";
-      const strain = strainLabel(row.strainType);
-      if (strain) {
-        const s = document.createElement("span");
-        s.className = "ddd-sidebar-tag ddd-sidebar-tag-strain ddd-strain-" + (row.strainType || "");
-        s.textContent = strain;
-        s.setAttribute("title", strain === "I" ? "Indica" : strain === "S" ? "Sativa" : "Hybrid");
-        tags.appendChild(s);
-      }
-      const styleSym = styleSymbol(row);
-      if (styleSym) {
-        const s = document.createElement("span");
-        s.className = "ddd-sidebar-tag ddd-sidebar-tag-symbol " + (row.isBulkFlower ? "ddd-tag-deli" : "ddd-tag-prepack");
-        s.textContent = styleSym;
-        s.setAttribute("title", row.isBulkFlower ? "Deli (by weight)" : "Pre-pack (sealed)");
-        tags.appendChild(s);
-      }
-      if (tags.childNodes.length) topRow.appendChild(tags);
+      const priceEl = document.createElement("div");
+      priceEl.className = "ddd-sidebar-item-price ddd-sidebar-item-metric";
+      priceEl.textContent = metricTextForBadge || "";
+      topRow.appendChild(priceEl);
       item.appendChild(topRow);
+      const badgesRow = document.createElement("div");
+      badgesRow.className = "ddd-sidebar-item-badges";
+      const strain = strainBadge(row.strainType) || (row.productType === "flower" ? "H" : null);
+      const strainType = row.strainType || "hybrid";
+      if (strain) {
+        const strainTag = document.createElement("span");
+        strainTag.className = "ddd-deal-badge ddd-badge-strain ddd-strain-" + strainType;
+        strainTag.textContent = strain;
+        strainTag.setAttribute("title", strainType === "indica" ? "Indica" : strainType === "sativa" ? "Sativa" : "Hybrid");
+        badgesRow.appendChild(strainTag);
+      }
+      if (row.productType === "flower") {
+        const packTag = document.createElement("span");
+        packTag.className = "ddd-deal-badge " + (row.isBulkFlower === true ? "ddd-badge-bulk" : "ddd-badge-prepack");
+        packTag.textContent = row.isBulkFlower === true ? "⚖" : "▫";
+        packTag.setAttribute("title", row.isBulkFlower === true ? "Bulk by weight" : "Pre-packed");
+        badgesRow.appendChild(packTag);
+      }
+      item.appendChild(badgesRow);
       const info = document.createElement("div");
       info.className = "ddd-sidebar-item-info";
       const nameEl = document.createElement("div");
       nameEl.className = "ddd-sidebar-item-name";
-      nameEl.textContent = displayName(row.name);
-      const metricEl = document.createElement("div");
-      metricEl.className = "ddd-sidebar-item-metric";
-      metricEl.textContent = row.score ? formatMetric(row.score) : "";
+      nameEl.textContent = displayTitle;
       info.appendChild(nameEl);
-      info.appendChild(metricEl);
+      if (row.brand) {
+        const brandEl = document.createElement("div");
+        brandEl.className = "ddd-sidebar-item-brand";
+        brandEl.textContent = row.brand;
+        info.appendChild(brandEl);
+      }
+      const metaParts = [];
+      if (row.productType) metaParts.push(categoryDisplayLabel(row.productType));
+      if (row.thc) metaParts.push(row.thc);
+      if (metaParts.length > 0) {
+        const metaRow = document.createElement("div");
+        metaRow.className = "ddd-sidebar-item-meta-row";
+        const metaLeft = document.createElement("span");
+        metaLeft.className = "ddd-sidebar-item-meta";
+        metaLeft.textContent = metaParts.join(" · ");
+        metaRow.appendChild(metaLeft);
+        info.appendChild(metaRow);
+      }
+      if (hasOverlay) {
+        const overlayBadge = document.createElement("div");
+        overlayBadge.className = "ddd-overlay-badge";
+        overlayBadge.innerHTML = "<span class=\"ddd-overlay-dot\"></span> Normalized";
+        info.appendChild(overlayBadge);
+        const overlayChips = document.createElement("div");
+        overlayChips.className = "ddd-overlay-chips";
+        overlayChips.textContent = [overlay.category, overlay.strain, overlay.thc].filter(Boolean).join(" · ") || "";
+        info.appendChild(overlayChips);
+      }
       item.appendChild(info);
       listInner.appendChild(item);
     }
-    addAdSlot("sponsored", "Sponsored", "Your ad here");
-    addAdSlot("featured", "Featured", "Dispensary promotion");
     pageLabel.textContent = page + " / " + totalPages;
     prevBtn.disabled = page <= 1;
     nextBtn.disabled = page >= totalPages;
@@ -675,11 +780,11 @@ function showSidebarModal(scoredItems, site) {
   const adAffiliate = document.createElement("div");
   adAffiliate.className = "ddd-sidebar-ad ddd-sidebar-ad-affiliate";
   adAffiliate.setAttribute("aria-label", "Sponsored");
-  adAffiliate.innerHTML = "<span class=\"ddd-sidebar-ad-label\">Sponsored</span><span class=\"ddd-sidebar-ad-placeholder\">Affiliate ad slot</span>";
+  adAffiliate.innerHTML = "<span class=\"ddd-sidebar-ad-label\">SPONSORED</span><span class=\"ddd-sidebar-ad-placeholder\">Affiliate ad slot</span>";
   const adDispensary = document.createElement("div");
   adDispensary.className = "ddd-sidebar-ad ddd-sidebar-ad-dispensary";
   adDispensary.setAttribute("aria-label", "Featured");
-  adDispensary.innerHTML = "<span class=\"ddd-sidebar-ad-label\">Featured</span><span class=\"ddd-sidebar-ad-placeholder\">Dispensary promotion</span>";
+  adDispensary.innerHTML = "<span class=\"ddd-sidebar-ad-label\">FEATURED</span><span class=\"ddd-sidebar-ad-placeholder\">Dispensary promotion</span>";
   adsSection.appendChild(adAffiliate);
   adsSection.appendChild(adDispensary);
   sidebarBody.appendChild(adsSection);
@@ -832,7 +937,7 @@ function applyFromCache(payload) {
     if (typeof window !== "undefined") {
       window.__dddRunAnalyze = (payload) => runAnalyze(payload);
       window.__dddShowSidebar = (payload) => {
-        if (payload && payload.scoredItems && payload.site) showSidebarModal(payload.scoredItems, payload.site);
+        if (payload && payload.scoredItems && payload.site) showSidebarModal(payload.scoredItems, payload.site, payload.pageUrl || "");
       };
       window.__dddApplyFromCache = (payload) => applyFromCache(payload);
     }
