@@ -121,7 +121,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
       await chrome.scripting.executeScript({ target, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
       await chrome.scripting.executeScript({ target, files: ["content.js"] });
       await chrome.scripting.insertCSS({ target, files: ["overlay.css"] });
-      await chrome.scripting.executeScript({
+      const applyResult = await chrome.scripting.executeScript({
         target,
         world: "ISOLATED",
         func: (payload) => {
@@ -130,6 +130,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
         },
         args: [{ items: cached.items, site: cached.site }],
       });
+      const applyRes = applyResult && applyResult[0] && applyResult[0].result;
       setOutputList(cached.items);
       if (target.frameIds && target.frameIds[0] !== 0) {
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
@@ -143,7 +144,11 @@ document.getElementById("analyze").addEventListener("click", async () => {
           args: [{ scoredItems: cached.items, site: cached.site }],
         });
       }
-      setDebug(cached.items.length, cached.site, "\n(cached)");
+      if (typeof triggerV2Ingest === "function") {
+        triggerV2Ingest(tab.id, cached.site, cached.items, tab.url || "");
+      }
+      const cacheDebugExtra = applyRes && applyRes.badgeDebug ? "\nbadgeDebug: " + JSON.stringify(applyRes.badgeDebug, null, 2) : "";
+      setDebug(cached.items.length, cached.site, "\n(cached)" + cacheDebugExtra);
     } catch (e) {
       if (DEBUG) console.warn("[DDD popup] cache apply error", e);
       setOutput("Cache apply failed, run Analyze again.");
@@ -278,6 +283,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
     if (count === 0 && res.loadError) debugParts.push("loadError: " + res.loadError);
     if (count === 0 && res.parseDebug) debugParts.push("parseDebug: " + JSON.stringify(res.parseDebug));
     if (count === 0 && res.bodyTextLength != null) debugParts.push("bodyTextLen: " + res.bodyTextLength);
+    if (res.badgeDebug) debugParts.push("badgeDebug: " + JSON.stringify(res.badgeDebug, null, 2));
     const debugExtra = debugParts.length ? "\n" + debugParts.join("\n") : "";
     setDebug(count, parser, debugExtra);
     // #region agent log
@@ -323,6 +329,9 @@ document.getElementById("analyze").addEventListener("click", async () => {
         } catch (e) {
           if (DEBUG) console.warn("[DDD popup] main frame sidebar error", e);
         }
+      }
+      if (typeof triggerV2Ingest === "function") {
+        triggerV2Ingest(tab.id, site, res.items, tab.url || "");
       }
     }
   } catch (e) {

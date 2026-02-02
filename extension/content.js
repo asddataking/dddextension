@@ -23,6 +23,128 @@ const API_BASE = "https://dailydispodeals.com";
 // TODO: POST API_BASE/api/analyze with device_id and items when server is ready.
 
 const DEBUG = false;
+const DEBUG_BADGES = true; // Set to false when done debugging badge placement
+
+function dddBadgeLog(msg, data) {
+  if (!DEBUG_BADGES) return;
+  const payload = { msg, data, ts: Date.now() };
+  console.log("[DDD badge]", msg, data != null ? data : "");
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({
+      type: "DDD_DEBUG_LOG",
+      payload: { hypothesisId: "BADGE", location: "content.js", message: msg, data: data || {} },
+    }).catch(() => {});
+  }
+}
+
+/** Find element by selector, traversing into shadow roots (Dutchie/Weedmaps use shadow DOM). */
+function querySelectorIncludingShadow(root, selector) {
+  if (!root) return null;
+  const dataIdMatch = selector && selector.match(/^\[data-ddd-id="([^"]+)"\]$/);
+  const targetDataId = dataIdMatch ? dataIdMatch[1] : null;
+
+  const findByAttr = (node) => {
+    if (!node) return null;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node;
+      if (targetDataId && el.getAttribute && el.getAttribute("data-ddd-id") === targetDataId) return el;
+      if (el.shadowRoot) {
+        const found = findByAttr(el.shadowRoot);
+        if (found) return found;
+      }
+      for (const c of el.children || []) {
+        const r = findByAttr(c);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE || node.nodeType === 11) {
+      for (const c of node.children || node.childNodes || []) {
+        const r = findByAttr(c);
+        if (r) return r;
+      }
+    }
+    return null;
+  };
+
+  try {
+    const direct = root.querySelector(selector);
+    if (direct) return direct;
+  } catch (_) {}
+  const walk = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
+    const el = node;
+    if (el.shadowRoot) {
+      try {
+        const inShadow = el.shadowRoot.querySelector(selector);
+        if (inShadow) return inShadow;
+      } catch (_) {}
+      if (targetDataId) {
+        const byAttr = findByAttr(el.shadowRoot);
+        if (byAttr) return byAttr;
+      }
+      for (const child of el.shadowRoot.children || []) {
+        const r = walk(child);
+        if (r) return r;
+      }
+    }
+    for (const child of el.children || []) {
+      const r = walk(child);
+      if (r) return r;
+    }
+    return null;
+  };
+  if (targetDataId) {
+    const byAttr = findByAttr(root);
+    if (byAttr) return byAttr;
+  }
+  for (const child of (root.children || root.childNodes || [])) {
+    const r = walk(child);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** Ensure badge styles exist in the given root (document or ShadowRoot). */
+function ensureBadgeStylesInRoot(root, site) {
+  if (!root || root.__dddBadgeStylesInjected) return;
+  try {
+    const style = document.createElement("style");
+    style.textContent =
+      ".ddd-badge{position:absolute;bottom:10px;left:10px;top:auto;padding:6px 10px;border-radius:8px;font-size:11px;font-weight:600;z-index:2147483642;line-height:1.2;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;border:none;font-family:inherit;text-align:left}" +
+      ".ddd-badge:hover{filter:brightness(1.05)}" +
+      ".ddd-worth{background:#059669;color:#fff}" +
+      ".ddd-mid{background:#d97706;color:#fff}" +
+      ".ddd-taxed{background:#dc2626;color:#fff}" +
+      (site === "dutchie"
+        ? ".ddd-badge-dutchie{font-family:system-ui,sans-serif;border-radius:10px;padding:6px 12px}.ddd-badge-dutchie.ddd-worth{background:#059669}.ddd-badge-dutchie.ddd-mid{background:#ea580c}.ddd-badge-dutchie.ddd-taxed{background:#dc2626}"
+        : ".ddd-badge-weedmaps{font-family:system-ui,sans-serif;border-radius:6px;padding:5px 10px;font-weight:700}.ddd-badge-weedmaps.ddd-worth{background:#16a34a}.ddd-badge-weedmaps.ddd-mid{background:#e8590c}.ddd-badge-weedmaps.ddd-taxed{background:#c92a2a}");
+    (root.head || root).appendChild(style);
+    root.__dddBadgeStylesInjected = true;
+  } catch (_) {}
+}
+
+/** Find all elements by selector, traversing into shadow roots. */
+function querySelectorAllIncludingShadow(root, selector) {
+  const out = [];
+  if (!root) return out;
+  try {
+    root.querySelectorAll(selector).forEach((el) => out.push(el));
+  } catch (_) {}
+  const walk = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node;
+    if (el.shadowRoot) {
+      try {
+        el.shadowRoot.querySelectorAll(selector).forEach((e) => out.push(e));
+      } catch (_) {}
+      for (const child of el.shadowRoot.children || []) walk(child);
+    }
+    for (const child of el.children || []) walk(child);
+  };
+  for (const child of (root.children || root.childNodes || [])) walk(child);
+  return out;
+}
 
 if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -37,6 +159,20 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
     }
     if (message.type === "DDD_CLEAR") {
       clearBadges();
+      sendResponse({ ok: true });
+      return true;
+    }
+    if (message.type === "DDD_V2_STATUS") {
+      if (typeof window !== "undefined" && typeof window.__dddUpdateV2Status === "function") {
+        window.__dddUpdateV2Status(message.status || "Idle");
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+    if (message.type === "DDD_V2_NORMALIZED") {
+      if (typeof window !== "undefined" && typeof window.__dddUpdateV2Normalized === "function") {
+        window.__dddUpdateV2Normalized(message.normalized || null);
+      }
       sendResponse({ ok: true });
       return true;
     }
@@ -120,20 +256,40 @@ async function runAnalyze(payload) {
 
   let badgesPlaced = 0;
   const panelItems = [];
+  const badgeDebug = { withSelector: 0, nodeFound: 0, cardFound: 0, inShadow: 0, placed: 0, noSelector: 0, nodeNotFound: 0, cardSkipped: 0 };
 
   const badgedCards = new Set();
+  const root = document.body || document.documentElement;
+  dddBadgeLog("badge placement start", {
+    site,
+    totalItems: scoredItems.length,
+    hasBody: !!document.body,
+    rootTag: root ? root.tagName : "none",
+    sampleSelectors: scoredItems.slice(0, 3).map((r) => r.nodeSelector),
+  });
+
   for (const row of scoredItems) {
     const { nodeSelector, score } = row;
     const label = score.label || "⚠️ Mid";
     const metricText = formatMetric(score);
 
     if (nodeSelector) {
+      badgeDebug.withSelector++;
       try {
-        const node = document.querySelector(nodeSelector);
+        const node = querySelectorIncludingShadow(root, nodeSelector);
         if (node) {
+          badgeDebug.nodeFound++;
           const card = node.closest("article") || node.closest("[class*='product']") || node.closest("[class*='card']") || (node.closest("[style*='position']") || node);
-          if (badgedCards.has(card)) continue;
+          if (badgedCards.has(card)) {
+            badgeDebug.cardSkipped++;
+            continue;
+          }
+          badgeDebug.cardFound++;
           badgedCards.add(card);
+          const cardRoot = card.getRootNode();
+          const inShadow = !!cardRoot.host;
+          if (inShadow) badgeDebug.inShadow++;
+          if (cardRoot.host) ensureBadgeStylesInRoot(cardRoot, site);
           const cardStyle = window.getComputedStyle(card);
           if (cardStyle.position === "static") {
             card.style.position = "relative";
@@ -152,24 +308,41 @@ async function runAnalyze(payload) {
           });
           card.appendChild(badge);
           badgesPlaced++;
+          badgeDebug.placed++;
+          if (badgeDebug.placed <= 2) {
+            dddBadgeLog("badge placed", { name: row.name, selector: nodeSelector, inShadow, cardTag: card.tagName });
+          }
         } else {
+          badgeDebug.nodeNotFound++;
+          if (badgeDebug.nodeNotFound <= 3) {
+            dddBadgeLog("node not found", { selector: nodeSelector, name: row.name });
+          }
           panelItems.push({ name: row.name, label, metricText });
         }
-      } catch (_) {
+      } catch (e) {
+        dddBadgeLog("badge error", { selector: nodeSelector, name: row.name, err: String(e && e.message) });
         panelItems.push({ name: row.name, label, metricText });
       }
     } else {
+      badgeDebug.noSelector++;
       panelItems.push({ name: row.name, label, metricText });
     }
   }
+
+  dddBadgeLog("badge placement done", {
+    badgesPlaced,
+    panelItems: panelItems.length,
+    debug: badgeDebug,
+    parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null,
+  });
 
   const isInIframe = typeof window !== "undefined" && window.self !== window.top;
   const skipSidebarInIframe = isInIframe && site === "dutchie";
   if (!skipSidebarInIframe) {
     showSidebarModal(scoredItems, site);
-    if (panelItems.length > 0 || badgesPlaced === 0) {
-      showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: formatMetric(r.score) })));
-    }
+  }
+  if (panelItems.length > 0 || badgesPlaced === 0) {
+    showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: formatMetric(r.score) })));
   }
 
   const bodyTextLength = typeof document !== "undefined" && document.body ? (document.body.innerText || "").length : 0;
@@ -180,6 +353,7 @@ async function runAnalyze(payload) {
     parser: site,
     parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null,
     bodyTextLength,
+    badgeDebug: DEBUG_BADGES ? badgeDebug : undefined,
   };
 }
 
@@ -300,7 +474,58 @@ function showSidebarModal(scoredItems, site) {
   infoContent.innerHTML = "<p class=\"ddd-sidebar-info-line\">Menu scored by value</p><p class=\"ddd-sidebar-info-line\">" + scoredItems.length + " items</p>";
   infoWrap.appendChild(infoContent);
   summaryWrap.appendChild(infoWrap);
+  const v2StatusEl = document.createElement("div");
+  v2StatusEl.className = "ddd-sidebar-v2-status";
+  v2StatusEl.setAttribute("aria-live", "polite");
+  v2StatusEl.textContent = "DDD Sync: Idle";
+  summaryWrap.appendChild(v2StatusEl);
+  const v2NormalizedWrap = document.createElement("div");
+  v2NormalizedWrap.className = "ddd-sidebar-v2-normalized";
+  v2NormalizedWrap.style.display = "none";
+  const v2NormalizedTitle = document.createElement("div");
+  v2NormalizedTitle.className = "ddd-sidebar-v2-normalized-title";
+  v2NormalizedTitle.textContent = "Normalized";
+  v2NormalizedWrap.appendChild(v2NormalizedTitle);
+  const v2NormalizedContent = document.createElement("div");
+  v2NormalizedContent.className = "ddd-sidebar-v2-normalized-content";
+  v2NormalizedWrap.appendChild(v2NormalizedContent);
+  summaryWrap.appendChild(v2NormalizedWrap);
   sidebarScroll.appendChild(summaryWrap);
+
+  const updateV2Status = (status) => {
+    v2StatusEl.textContent = "DDD Sync: " + (status || "Idle");
+  };
+  const updateV2Normalized = (data) => {
+    v2NormalizedContent.innerHTML = "";
+    if (!data || typeof data !== "object") {
+      v2NormalizedWrap.style.display = "none";
+      return;
+    }
+    const disp = data.dispensary;
+    if (disp && (disp.name || disp.location)) {
+      const p = document.createElement("p");
+      p.className = "ddd-sidebar-info-line";
+      p.textContent = (disp.name || "") + (disp.location ? " · " + disp.location : "");
+      v2NormalizedContent.appendChild(p);
+    }
+    const deals = data.deals || [];
+    for (let i = 0; i < Math.min(deals.length, 5); i++) {
+      const d = deals[i];
+      const div = document.createElement("div");
+      div.className = "ddd-sidebar-v2-deal";
+      div.textContent = (d.title || d.product_name || "") + (d.price_text ? " " + d.price_text : "") + (d.discount_text ? " " + d.discount_text : "");
+      v2NormalizedContent.appendChild(div);
+    }
+    if (deals.length === 0 && (!disp || !disp.name)) {
+      v2NormalizedWrap.style.display = "none";
+      return;
+    }
+    v2NormalizedWrap.style.display = "block";
+  };
+  if (typeof window !== "undefined") {
+    window.__dddUpdateV2Status = updateV2Status;
+    window.__dddUpdateV2Normalized = updateV2Normalized;
+  }
 
   const displayName = (name) => {
     const s = (name || "").trim() || "Product";
@@ -487,8 +712,12 @@ function showFloatingPanel(items) {
 }
 
 function clearBadges() {
-  document.querySelectorAll(".ddd-badge, .ddd-panel, .ddd-sidebar-backdrop").forEach((el) => el.remove());
-  document.querySelectorAll("[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
+  const root = document.body || document.documentElement;
+  if (root) {
+    querySelectorAllIncludingShadow(root, ".ddd-badge").forEach((el) => el.remove());
+    querySelectorAllIncludingShadow(root, "[data-ddd-id]").forEach((el) => el.removeAttribute("data-ddd-id"));
+  }
+  document.querySelectorAll(".ddd-panel, .ddd-sidebar-backdrop").forEach((el) => el.remove());
 }
 
 function applyFromCache(payload) {
@@ -497,6 +726,56 @@ function applyFromCache(payload) {
   }
   clearBadges();
   const site = payload.site;
+  const badgeDebug = { withSelector: 0, nodeFound: 0, placed: 0, nodeNotFound: 0, reParsed: 0, matched: 0 };
+
+  // Cached nodeSelectors are stale (data-ddd-id was set on a previous DOM). Re-parse to get fresh selectors.
+  let itemsToBadge = payload.items;
+  if (typeof parseItemsFromDOM === "function") {
+    const freshParsed = parseItemsFromDOM(site);
+    if (freshParsed.length > 0) {
+      badgeDebug.reParsed = freshParsed.length;
+      const norm = (s) => (s || "").toString().trim().toLowerCase().slice(0, 50);
+      const matchKey = (item) => norm(item.name) + "|" + (item.price ?? "") + "|" + (item.weightGrams ?? "");
+      const parsedByKey = new Map();
+      for (const p of freshParsed) parsedByKey.set(matchKey(p), p);
+      let merged = [];
+      for (const cached of payload.items) {
+        const key = matchKey(cached);
+        const fresh = parsedByKey.get(key);
+        if (fresh && fresh.nodeSelector && cached.score) {
+          merged.push({ ...cached, nodeSelector: fresh.nodeSelector });
+          badgeDebug.matched++;
+        }
+      }
+      // Fallback: index-based match when key match yields few results (menu order usually stable)
+      if (merged.length < Math.min(payload.items.length, freshParsed.length) * 0.5) {
+        merged = [];
+        badgeDebug.matched = 0;
+        const n = Math.min(payload.items.length, freshParsed.length);
+        for (let i = 0; i < n; i++) {
+          const cached = payload.items[i];
+          const fresh = freshParsed[i];
+          if (fresh && fresh.nodeSelector && cached && cached.score) {
+            merged.push({ ...cached, nodeSelector: fresh.nodeSelector });
+            badgeDebug.matched++;
+          }
+        }
+        badgeDebug.matchStrategy = "index";
+      } else {
+        badgeDebug.matchStrategy = "key";
+      }
+      if (merged.length > 0) {
+        itemsToBadge = merged;
+        if (DEBUG_BADGES && merged.length > 0) {
+          const root = document.body || document.documentElement;
+          const firstNode = querySelectorIncludingShadow(root, merged[0].nodeSelector);
+          badgeDebug.firstSelectorTest = firstNode ? "found" : "notFound";
+          badgeDebug.firstSelector = merged[0].nodeSelector;
+        }
+      }
+    }
+  }
+
   const formatMetric = (score) => {
     if (!score || score.metricLabel == null || score.metricValue == null) return "";
     const v = score.metricValue;
@@ -507,17 +786,22 @@ function applyFromCache(payload) {
   };
   let badgesPlaced = 0;
   const badgedCards = new Set();
-  for (const row of payload.items) {
+  for (const row of itemsToBadge) {
     const { nodeSelector, score } = row;
     if (!nodeSelector || !score) continue;
     const label = score.label || "⚠️ Mid";
     const metricText = formatMetric(score);
     try {
-      const node = document.querySelector(nodeSelector);
+      badgeDebug.withSelector++;
+      const root = document.body || document.documentElement;
+      const node = querySelectorIncludingShadow(root, nodeSelector);
       if (node) {
+        badgeDebug.nodeFound++;
         const card = node.closest("article") || node.closest("[class*='product']") || node.closest("[class*='card']") || (node.closest("[style*='position']") || node);
         if (badgedCards.has(card)) continue;
         badgedCards.add(card);
+        const cardRoot = card.getRootNode();
+        if (cardRoot.host) ensureBadgeStylesInRoot(cardRoot, site);
         const cardStyle = window.getComputedStyle(card);
         if (cardStyle.position === "static") card.style.position = "relative";
         const badge = document.createElement("button");
@@ -534,10 +818,14 @@ function applyFromCache(payload) {
         });
         card.appendChild(badge);
         badgesPlaced++;
+        badgeDebug.placed++;
+      } else {
+        badgeDebug.nodeNotFound++;
       }
     } catch (_) {}
   }
-  return { ok: true, count: payload.items.length, badgesPlaced };
+  if (DEBUG_BADGES) dddBadgeLog("applyFromCache done", { badgesPlaced, badgeDebug });
+  return { ok: true, count: payload.items.length, badgesPlaced, badgeDebug: DEBUG_BADGES ? badgeDebug : undefined };
 }
 
 // Expose for popup to call via executeScript (avoids "Receiving end does not exist").

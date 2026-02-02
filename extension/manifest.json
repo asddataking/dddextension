@@ -19,7 +19,8 @@
     "*://*.dutchie.com/*",
     "*://dutchie.com/*",
     "*://mindrightmi.com/*",
-    "*://*.mindrightmi.com/*"
+    "*://*.mindrightmi.com/*",
+    "*://dailydispodeals.com/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
