@@ -80,8 +80,9 @@ function inferProductType(text, weightGrams, mgTotal) {
   if (weightGrams != null && weightGrams > 0) return "flower";
   if (/\b(flower|eighth|quarter|half|oz)\b/.test(t)) return "flower";
   if (/\b(indica|sativa|hybrid)\b/.test(t)) return "flower";
-  if (/\b(cartridge|cart)\b/.test(t)) return "vape";
+  // Weight patterns (1g, 1/8, oz) → flower; check before vape so flower with weight text wins
   if (WEIGHT_GRAM_REGEX.test(t) || WEIGHT_FRAC_REGEX.test(t) || OZ_REGEX.test(t)) return "flower";
+  if (/\bcartridge\b/.test(t)) return "vape";
   return "other";
 }
 
@@ -327,11 +328,6 @@ function findCardCandidatesGeneric(doc) {
  */
 function findDutchieCards(doc) {
   const candidates = [];
-  // #region agent log
-  try {
-    if (typeof window !== "undefined") window.__dddParseDebug = window.__dddParseDebug || {};
-  } catch (_) {}
-  // #endregion
   // Start from body so we traverse into shadow roots (documentElement can miss or include head)
   const root = doc.body || doc.documentElement;
   if (!root) return [];
@@ -355,11 +351,6 @@ function findDutchieCards(doc) {
     root,
     'a[href*="/embedded-menu/"][href*="/product/"], a[href*="dutchie.com"][href*="/product/"], a[href*="/product/"], a[href*="product"]'
   );
-  // #region agent log
-  try {
-    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieProductLinks = productLinks.length;
-  } catch (_) {}
-  // #endregion
   const seen = new Set();
 
   for (const link of productLinks) {
@@ -390,12 +381,6 @@ function findDutchieCards(doc) {
       depth++;
     }
   }
-
-  // #region agent log
-  try {
-    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieAfterLink = candidates.length;
-  } catch (_) {}
-  // #endregion
   if (candidates.length > 0) return candidates;
 
   // Strategy 2: find any buttons with price + weight (e.g. "1g $12.00 Add to cart") and use their container as card
@@ -424,20 +409,8 @@ function findDutchieCards(doc) {
       depth++;
     }
   }
-
-  // #region agent log
-  try {
-    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieAfterButton = candidates.length;
-  } catch (_) {}
-  // #endregion
   if (candidates.length > 0) return candidates;
-  const genericResult = findCardCandidatesGeneric(doc);
-  // #region agent log
-  try {
-    if (typeof window !== "undefined" && window.__dddParseDebug) window.__dddParseDebug.dutchieGenericCount = genericResult.length;
-  } catch (_) {}
-  // #endregion
-  return genericResult;
+  return findCardCandidatesGeneric(doc);
 }
 
 /**
@@ -474,11 +447,6 @@ function findCardCandidates(doc, site) {
  */
 function parseItemsFromDOM(site) {
   try {
-    // #region agent log
-    try {
-      if (typeof window !== "undefined") window.__dddParseDebug = undefined;
-    } catch (_) {}
-    // #endregion
     const doc = typeof document !== "undefined" ? document : null;
     if (!doc || !doc.body) return [];
 

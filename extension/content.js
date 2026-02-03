@@ -18,24 +18,38 @@
     }
   };
   try {
-// Future: send extracted items to server for analyze. v1 is local-only.
-const API_BASE = "https://dailydispodeals.com";
-// TODO: POST API_BASE/api/analyze with device_id and items when server is ready.
+const STYLE_ID = "ddd-checker-style";
+
+function injectDDDCheckerStyles() {
+  return new Promise((resolve) => {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
+      resolve();
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "DDD_GET_CSS" }, (r) => {
+      try {
+        const root = document.head || document.documentElement;
+        if (!root) { resolve(); return; }
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+        document.querySelectorAll("style").forEach((s) => {
+          if (s.id !== STYLE_ID && s.textContent && s.textContent.includes(".ddd-sidebar-modal")) s.remove();
+        });
+        if (r && r.css) {
+          const style = document.createElement("style");
+          style.id = STYLE_ID;
+          style.textContent = r.css;
+          root.appendChild(style);
+          if (typeof window !== "undefined") window.__dddCssVersion = (r.version || "?") + "-" + Date.now().toString(36).slice(-6);
+        }
+      } catch (_) {}
+      resolve();
+    });
+  });
+}
+injectDDDCheckerStyles();
 
 const DEBUG = false;
-const DEBUG_BADGES = true; // Set to false when done debugging badge placement
-
-function dddBadgeLog(msg, data) {
-  if (!DEBUG_BADGES) return;
-  const payload = { msg, data, ts: Date.now() };
-  console.log("[DDD badge]", msg, data != null ? data : "");
-  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-    chrome.runtime.sendMessage({
-      type: "DDD_DEBUG_LOG",
-      payload: { hypothesisId: "BADGE", location: "content.js", message: msg, data: data || {} },
-    }).catch(() => {});
-  }
-}
 
 /** Find element by selector, traversing into shadow roots (Dutchie/Weedmaps use shadow DOM). */
 function querySelectorIncludingShadow(root, selector) {
@@ -176,6 +190,13 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
       sendResponse({ ok: true });
       return true;
     }
+    if (message.type === "DDD_V2_COMPARISONS") {
+      if (typeof window !== "undefined" && typeof window.__dddUpdateBetterNearby === "function") {
+        window.__dddUpdateBetterNearby(message.comparisons || null);
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
   });
 }
 
@@ -191,25 +212,6 @@ async function runAnalyze(payload) {
 
   clearBadges();
 
-  // #region agent log
-  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-    chrome.runtime.sendMessage({
-      type: "DDD_DEBUG_LOG",
-      payload: {
-        hypothesisId: "D",
-        location: "content.js:runAnalyze start",
-        message: "document context",
-        data: {
-          site,
-          docHref: typeof document !== "undefined" ? (document.location && document.location.href ? document.location.href.slice(0, 120) : "no href") : "no doc",
-          hasBody: typeof document !== "undefined" && !!document.body,
-          hasDocElement: typeof document !== "undefined" && !!document.documentElement,
-        },
-      },
-    }).catch(() => {});
-  }
-  // #endregion
-
   let items = [];
   try {
     // Dutchie: SPA often renders product list after load; poll parse until items found or timeout (15s)
@@ -224,19 +226,6 @@ async function runAnalyze(payload) {
     } else {
       items = typeof parseItemsFromDOM === "function" ? parseItemsFromDOM(site) : [];
     }
-    // #region agent log
-    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({
-        type: "DDD_DEBUG_LOG",
-        payload: {
-          hypothesisId: "C",
-          location: "content.js:after parse",
-          message: "parse result",
-          data: { site, itemCount: items.length, parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null },
-        },
-      }).catch(() => {});
-    }
-    // #endregion
   } catch (e) {
     if (DEBUG) console.warn("[DDD content] parse error", e);
   }
@@ -256,17 +245,9 @@ async function runAnalyze(payload) {
 
   let badgesPlaced = 0;
   const panelItems = [];
-  const badgeDebug = { withSelector: 0, nodeFound: 0, cardFound: 0, inShadow: 0, placed: 0, noSelector: 0, nodeNotFound: 0, cardSkipped: 0 };
 
   const badgedCards = new Set();
   const root = document.body || document.documentElement;
-  dddBadgeLog("badge placement start", {
-    site,
-    totalItems: scoredItems.length,
-    hasBody: !!document.body,
-    rootTag: root ? root.tagName : "none",
-    sampleSelectors: scoredItems.slice(0, 3).map((r) => r.nodeSelector),
-  });
 
   for (const row of scoredItems) {
     const { nodeSelector, score } = row;
@@ -274,21 +255,13 @@ async function runAnalyze(payload) {
     const metricText = formatMetric(score);
 
     if (nodeSelector) {
-      badgeDebug.withSelector++;
       try {
         const node = querySelectorIncludingShadow(root, nodeSelector);
         if (node) {
-          badgeDebug.nodeFound++;
           const card = node.closest("article") || node.closest("[class*='product']") || node.closest("[class*='card']") || (node.closest("[style*='position']") || node);
-          if (badgedCards.has(card)) {
-            badgeDebug.cardSkipped++;
-            continue;
-          }
-          badgeDebug.cardFound++;
+          if (badgedCards.has(card)) continue;
           badgedCards.add(card);
           const cardRoot = card.getRootNode();
-          const inShadow = !!cardRoot.host;
-          if (inShadow) badgeDebug.inShadow++;
           if (cardRoot.host) ensureBadgeStylesInRoot(cardRoot, site);
           const cardStyle = window.getComputedStyle(card);
           if (cardStyle.position === "static") {
@@ -308,23 +281,13 @@ async function runAnalyze(payload) {
           });
           card.appendChild(badge);
           badgesPlaced++;
-          badgeDebug.placed++;
-          if (badgeDebug.placed <= 2) {
-            dddBadgeLog("badge placed", { name: row.name, selector: nodeSelector, inShadow, cardTag: card.tagName });
-          }
         } else {
-          badgeDebug.nodeNotFound++;
-          if (badgeDebug.nodeNotFound <= 3) {
-            dddBadgeLog("node not found", { selector: nodeSelector, name: row.name });
-          }
           panelItems.push({ name: row.name, label, metricText });
         }
-      } catch (e) {
-        dddBadgeLog("badge error", { selector: nodeSelector, name: row.name, err: String(e && e.message) });
+      } catch (_) {
         panelItems.push({ name: row.name, label, metricText });
       }
     } else {
-      badgeDebug.noSelector++;
       panelItems.push({ name: row.name, label, metricText });
     }
   }
@@ -340,7 +303,7 @@ async function runAnalyze(payload) {
   const skipSidebarInIframe = isInIframe && site === "dutchie";
   if (!skipSidebarInIframe) {
     const pageUrl = typeof document !== "undefined" && document.location ? document.location.href : "";
-    showSidebarModal(scoredItems, site, pageUrl);
+    await showSidebarModal(scoredItems, site, pageUrl);
   }
   if (panelItems.length > 0 || badgesPlaced === 0) {
     showFloatingPanel(scoredItems.slice(0, 10).map((r) => ({ name: r.name, label: r.score.label, metricText: formatMetric(r.score) })));
@@ -352,13 +315,12 @@ async function runAnalyze(payload) {
     items: scoredItems,
     count: scoredItems.length,
     parser: site,
-    parseDebug: typeof window !== "undefined" && window.__dddParseDebug ? window.__dddParseDebug : null,
     bodyTextLength,
-    badgeDebug: DEBUG_BADGES ? badgeDebug : undefined,
   };
 }
 
-function showSidebarModal(scoredItems, site, pageUrl) {
+async function showSidebarModal(scoredItems, site, pageUrl) {
+  await injectDDDCheckerStyles();
   const existing = document.querySelector(".ddd-sidebar-backdrop");
   if (existing) existing.remove();
 
@@ -410,6 +372,12 @@ function showSidebarModal(scoredItems, site, pageUrl) {
   builtIn.className = "ddd-sidebar-built-in";
   builtIn.textContent = "Built in Michigan";
   headerLeft.appendChild(builtIn);
+  if (typeof DEV_SHOW_CSS_VERSION !== "undefined" && DEV_SHOW_CSS_VERSION && typeof window !== "undefined" && window.__dddCssVersion) {
+    const cssStamp = document.createElement("span");
+    cssStamp.className = "ddd-sidebar-css-version";
+    cssStamp.textContent = "css: " + window.__dddCssVersion;
+    headerLeft.appendChild(cssStamp);
+  }
 
   const statusWrap = document.createElement("div");
   statusWrap.className = "ddd-sidebar-status-wrap";
@@ -439,6 +407,7 @@ function showSidebarModal(scoredItems, site, pageUrl) {
           if (r && r.ok && r.normalized) {
             updateV2Status("Normalized ✓");
             if (typeof window.__dddUpdateV2Normalized === "function") window.__dddUpdateV2Normalized(r.normalized);
+            if (r.comparisons && typeof window.__dddUpdateBetterNearby === "function") window.__dddUpdateBetterNearby(r.comparisons);
           } else {
             updateV2Status("Failed");
           }
@@ -495,6 +464,7 @@ function showSidebarModal(scoredItems, site, pageUrl) {
   const infoContent = document.createElement("div");
   infoContent.className = "ddd-sidebar-info-content";
   infoContent.innerHTML = "<p class=\"ddd-sidebar-info-line\">Menu scored by value</p><p class=\"ddd-sidebar-info-line\">" + scoredItems.length + " items</p>";
+  infoWrap.appendChild(infoContent);
   summaryWrap.appendChild(infoWrap);
   const v2NormalizedWrap = document.createElement("div");
   v2NormalizedWrap.className = "ddd-sidebar-v2-normalized";
@@ -508,6 +478,109 @@ function showSidebarModal(scoredItems, site, pageUrl) {
   v2NormalizedWrap.appendChild(v2NormalizedContent);
   summaryWrap.appendChild(v2NormalizedWrap);
   sidebarScroll.appendChild(summaryWrap);
+
+  let comparisonsState = {
+    has_better_nearby: false,
+    better_count: 0,
+    best_delta_percent: null,
+    cta_reason: "",
+    cta_url: ""
+  };
+  let betterNearbyDismissed = false;
+  const DEFAULT_CTA_URL = "https://dailydispodeals.com/?src=ext_better_nearby";
+  if (typeof DEV_BETTER_NEARBY !== "undefined" && DEV_BETTER_NEARBY) {
+    comparisonsState = {
+      has_better_nearby: true,
+      better_count: 6,
+      best_delta_percent: 22,
+      cta_reason: "",
+      cta_url: "https://dailydispodeals.com/signup?src=ext_better_nearby"
+    };
+  }
+
+  const betterbarWrap = document.createElement("div");
+  betterbarWrap.className = "ddd-betterbar";
+  const betterbarInner = document.createElement("div");
+  betterbarInner.className = "ddd-betterbar-inner";
+  betterbarInner.setAttribute("role", "button");
+  betterbarInner.setAttribute("tabindex", "0");
+  const betterbarLeft = document.createElement("div");
+  betterbarLeft.className = "ddd-betterbar-left";
+  const betterbarTitle = document.createElement("div");
+  betterbarTitle.className = "ddd-betterbar-title";
+  const betterbarSub = document.createElement("div");
+  betterbarSub.className = "ddd-betterbar-sub";
+  const betterbarRight = document.createElement("div");
+  betterbarRight.className = "ddd-betterbar-right";
+  const betterbarCount = document.createElement("span");
+  betterbarCount.className = "ddd-betterbar-count";
+  const betterbarBtn = document.createElement("span");
+  betterbarBtn.className = "ddd-betterbar-btn";
+  betterbarBtn.textContent = "View";
+  const betterbarDismiss = document.createElement("button");
+  betterbarDismiss.type = "button";
+  betterbarDismiss.className = "ddd-betterbar-dismiss";
+  betterbarDismiss.setAttribute("aria-label", "Dismiss");
+  betterbarDismiss.textContent = "×";
+  betterbarLeft.appendChild(betterbarTitle);
+  betterbarLeft.appendChild(betterbarSub);
+  betterbarRight.appendChild(betterbarCount);
+  betterbarRight.appendChild(betterbarBtn);
+  betterbarRight.appendChild(betterbarDismiss);
+  betterbarInner.appendChild(betterbarLeft);
+  betterbarInner.appendChild(betterbarRight);
+  betterbarWrap.appendChild(betterbarInner);
+  betterbarWrap.style.display = "none";
+
+  const renderBetterBar = () => {
+    const show = comparisonsState.has_better_nearby && !betterNearbyDismissed;
+    betterbarWrap.style.display = show ? "block" : "none";
+    if (!show) return;
+    betterbarTitle.textContent = "Found better nearby";
+    const subParts = [];
+    if (comparisonsState.better_count > 0) subParts.push(comparisonsState.better_count + " better deals");
+    if (comparisonsState.best_delta_percent != null) subParts.push("up to " + comparisonsState.best_delta_percent + "% cheaper");
+    betterbarSub.textContent = subParts.join(" · ") || "";
+    betterbarCount.textContent = comparisonsState.better_count > 0 ? String(comparisonsState.better_count) : "";
+    betterbarCount.style.display = comparisonsState.better_count > 0 ? "inline-flex" : "none";
+  };
+
+  betterbarInner.addEventListener("click", (e) => {
+    if (e.target === betterbarDismiss) return;
+    const url = comparisonsState.cta_url || DEFAULT_CTA_URL;
+    if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url });
+    } else {
+      window.open(url, "_blank");
+    }
+  });
+  betterbarDismiss.addEventListener("click", (e) => {
+    e.stopPropagation();
+    betterNearbyDismissed = true;
+    renderBetterBar();
+  });
+  betterbarInner.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      betterbarInner.click();
+    }
+  });
+
+  function updateBetterNearby(comparisons) {
+    if (!comparisons || typeof comparisons !== "object") return;
+    comparisonsState = {
+      has_better_nearby: !!comparisons.has_better_nearby,
+      better_count: Math.max(0, parseInt(comparisons.better_count, 10) || 0),
+      best_delta_percent: comparisons.best_delta_percent != null ? comparisons.best_delta_percent : null,
+      cta_reason: String(comparisons.cta_reason || ""),
+      cta_url: String(comparisons.cta_url || "").trim() || ""
+    };
+    renderBetterBar();
+  }
+
+  renderBetterBar();
+  sidebarScroll.appendChild(betterbarWrap);
+  if (typeof window !== "undefined") window.__dddUpdateBetterNearby = updateBetterNearby;
 
   const updateV2Status = (status) => {
     v2Status = status || "Idle";
@@ -831,14 +904,12 @@ function applyFromCache(payload) {
   }
   clearBadges();
   const site = payload.site;
-  const badgeDebug = { withSelector: 0, nodeFound: 0, placed: 0, nodeNotFound: 0, reParsed: 0, matched: 0 };
 
   // Cached nodeSelectors are stale (data-ddd-id was set on a previous DOM). Re-parse to get fresh selectors.
   let itemsToBadge = payload.items;
   if (typeof parseItemsFromDOM === "function") {
     const freshParsed = parseItemsFromDOM(site);
     if (freshParsed.length > 0) {
-      badgeDebug.reParsed = freshParsed.length;
       const norm = (s) => (s || "").toString().trim().toLowerCase().slice(0, 50);
       const matchKey = (item) => norm(item.name) + "|" + (item.price ?? "") + "|" + (item.weightGrams ?? "");
       const parsedByKey = new Map();
@@ -849,35 +920,21 @@ function applyFromCache(payload) {
         const fresh = parsedByKey.get(key);
         if (fresh && fresh.nodeSelector && cached.score) {
           merged.push({ ...cached, nodeSelector: fresh.nodeSelector });
-          badgeDebug.matched++;
         }
       }
       // Fallback: index-based match when key match yields few results (menu order usually stable)
       if (merged.length < Math.min(payload.items.length, freshParsed.length) * 0.5) {
         merged = [];
-        badgeDebug.matched = 0;
         const n = Math.min(payload.items.length, freshParsed.length);
         for (let i = 0; i < n; i++) {
           const cached = payload.items[i];
           const fresh = freshParsed[i];
           if (fresh && fresh.nodeSelector && cached && cached.score) {
             merged.push({ ...cached, nodeSelector: fresh.nodeSelector });
-            badgeDebug.matched++;
           }
         }
-        badgeDebug.matchStrategy = "index";
-      } else {
-        badgeDebug.matchStrategy = "key";
       }
-      if (merged.length > 0) {
-        itemsToBadge = merged;
-        if (DEBUG_BADGES && merged.length > 0) {
-          const root = document.body || document.documentElement;
-          const firstNode = querySelectorIncludingShadow(root, merged[0].nodeSelector);
-          badgeDebug.firstSelectorTest = firstNode ? "found" : "notFound";
-          badgeDebug.firstSelector = merged[0].nodeSelector;
-        }
-      }
+      if (merged.length > 0) itemsToBadge = merged;
     }
   }
 
@@ -897,11 +954,9 @@ function applyFromCache(payload) {
     const label = score.label || "⚠️ Mid";
     const metricText = formatMetric(score);
     try {
-      badgeDebug.withSelector++;
       const root = document.body || document.documentElement;
       const node = querySelectorIncludingShadow(root, nodeSelector);
       if (node) {
-        badgeDebug.nodeFound++;
         const card = node.closest("article") || node.closest("[class*='product']") || node.closest("[class*='card']") || (node.closest("[style*='position']") || node);
         if (badgedCards.has(card)) continue;
         badgedCards.add(card);
@@ -923,14 +978,10 @@ function applyFromCache(payload) {
         });
         card.appendChild(badge);
         badgesPlaced++;
-        badgeDebug.placed++;
-      } else {
-        badgeDebug.nodeNotFound++;
       }
     } catch (_) {}
   }
-  if (DEBUG_BADGES) dddBadgeLog("applyFromCache done", { badgesPlaced, badgeDebug });
-  return { ok: true, count: payload.items.length, badgesPlaced, badgeDebug: DEBUG_BADGES ? badgeDebug : undefined };
+  return { ok: true, count: payload.items.length, badgesPlaced };
 }
 
 // Expose for popup to call via executeScript (avoids "Receiving end does not exist").

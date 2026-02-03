@@ -1,15 +1,7 @@
 // Daily Dispo Deals – Deal Checker (MV3)
 // Minimal service worker; no heavy logic, no API keys.
 
-const DEBUG = false;
-
-chrome.runtime.onInstalled.addListener(() => {
-  if (DEBUG) console.log("[DDD] Extension installed.");
-});
-
-// #region agent log
-const DDD_DEBUG_INGEST = "http://127.0.0.1:7244/ingest/7581459e-929e-47bd-9dee-b089f99a55e5";
-// #endregion
+chrome.runtime.onInstalled.addListener(() => {});
 
 const V2_API_BASE = "https://dailydispodeals.com";
 const V2_INGEST_PATH = "/api/ingest/extension";
@@ -34,6 +26,20 @@ function doV2IngestFetch(ingestPayload, installId) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "DDD_GET_CSS") {
+    const url = chrome.runtime.getURL("overlay.css");
+    const manifest = chrome.runtime.getManifest();
+    const version = (manifest && manifest.version) || "1.0.0";
+    fetch(url, { cache: "no-store" })
+      .then((r) => r.text())
+      .then((css) => sendResponse({ css, version }))
+      .catch(() => sendResponse({ css: null, version }));
+    return true;
+  }
+  if (msg.type === "DDD_DEBUG_LOG") {
+    sendResponse();
+    return false;
+  }
   if (msg.type === "DDD_GET_LOGO") {
     const url = chrome.runtime.getURL("icons/32.png");
     fetch(url)
@@ -48,15 +54,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(() => sendResponse({ logoDataUrl: null }));
     return true;
   }
-  if (msg.type === "DDD_DEBUG_LOG" && msg.payload) {
-    fetch(DDD_DEBUG_INGEST, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...msg.payload, timestamp: Date.now(), sessionId: "debug-session" }),
-    }).catch(() => {});
-    sendResponse();
-    return false;
-  }
   if (msg.type === "DDD_V2_INGEST" && msg.payload) {
     const { ingestPayload, installId } = msg.payload;
     const doFetch = () =>
@@ -64,7 +61,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then((res) => res.json().catch(() => ({})))
         .then((data) => {
           if (data && data.ok) {
-            return { ok: true, ingest_id: data.ingest_id, normalized: data.normalized };
+            const res = { ok: true, ingest_id: data.ingest_id, normalized: data.normalized };
+            if (data.comparisons && typeof data.comparisons === "object") res.comparisons = data.comparisons;
+            return res;
           }
           return { ok: false, error: data.error || "Request failed" };
         })

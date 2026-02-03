@@ -14,6 +14,10 @@ function triggerV2Ingest(tabId, site, items, pageUrl) {
     chrome.tabs.sendMessage(tabId, { type: "DDD_V2_NORMALIZED", normalized: data }).catch(function () {});
   }
 
+  function notifyComparisons(comparisons) {
+    chrome.tabs.sendMessage(tabId, { type: "DDD_V2_COMPARISONS", comparisons: comparisons }).catch(function () {});
+  }
+
   notifyStatus("Sending…");
 
   var payload = mapToIngestPayload(site, items, pageUrl);
@@ -40,6 +44,7 @@ function triggerV2Ingest(tabId, site, items, pageUrl) {
       if (response && response.ok && response.normalized) {
         notifyStatus("Normalized ✓");
         notifyNormalized(response.normalized);
+        if (response.comparisons) notifyComparisons(response.comparisons);
         var toStore = response.normalized;
         if (typeof toStore === "object") {
           try {

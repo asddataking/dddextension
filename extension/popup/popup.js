@@ -1,11 +1,6 @@
 /**
- * Popup: status, Analyze (inject + message), Clear, output area, debug accordion.
+ * Popup: status, Analyze (inject + message), Clear, output area.
  */
-
-// Future: optional server analyze. v1 is local-only.
-const API_BASE = "https://dailydispodeals.com";
-// TODO: POST API_BASE/api/analyze with device_id and items when server is ready.
-
 const DEBUG = false;
 
 getOrCreateDeviceId().then(() => {});
@@ -114,13 +109,18 @@ document.getElementById("analyze").addEventListener("click", async () => {
     try {
       let target = { tabId: tab.id };
       if (site === "dutchie") {
-        const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
-        const dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
+        const isDutchiePoweredHost = url && !url.includes("dutchie.com");
+        let dutchieFrame = null;
+        for (let attempt = 0; attempt < (isDutchiePoweredHost ? 5 : 1); attempt++) {
+          const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
+          dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
+          if (dutchieFrame) break;
+          if (isDutchiePoweredHost && attempt < 4) await new Promise((r) => setTimeout(r, 800));
+        }
         if (dutchieFrame && dutchieFrame.frameId !== 0) target = { tabId: tab.id, frameIds: [dutchieFrame.frameId] };
       }
       await chrome.scripting.executeScript({ target, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"] });
       await chrome.scripting.executeScript({ target, files: ["content.js"] });
-      await chrome.scripting.insertCSS({ target, files: ["overlay.css"] });
       const applyResult = await chrome.scripting.executeScript({
         target,
         world: "ISOLATED",
@@ -133,9 +133,8 @@ document.getElementById("analyze").addEventListener("click", async () => {
       const applyRes = applyResult && applyResult[0] && applyResult[0].result;
       setOutputList(cached.items);
       if (target.frameIds && target.frameIds[0] !== 0) {
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js"] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"] });
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-        await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["overlay.css"] });
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: (payload) => {
@@ -147,11 +146,11 @@ document.getElementById("analyze").addEventListener("click", async () => {
       if (typeof triggerV2Ingest === "function") {
         triggerV2Ingest(tab.id, cached.site, cached.items, tab.url || "");
       }
-      const cacheDebugExtra = applyRes && applyRes.badgeDebug ? "\nbadgeDebug: " + JSON.stringify(applyRes.badgeDebug, null, 2) : "";
-      setDebug(cached.items.length, cached.site, "\n(cached)" + cacheDebugExtra);
+      setDebug(cached.items.length, cached.site, "\n(cached)");
     } catch (e) {
-      if (DEBUG) console.warn("[DDD popup] cache apply error", e);
-      setOutput("Cache apply failed, run Analyze again.");
+      console.warn("[DDD popup] cache apply error", e);
+      const errMsg = (e && e.message) ? String(e.message).slice(0, 100) : "";
+      setOutput("Cache apply failed" + (errMsg ? ": " + errMsg : " — run Analyze again."));
     }
     return;
   }
@@ -176,14 +175,12 @@ document.getElementById("analyze").addEventListener("click", async () => {
 
   // For Dutchie-powered sites (e.g. mindrightmi.com), menu is in an iframe from dutchie.com/embedded-menu. Inject into that frame.
   let target = { tabId: tab.id };
-  let framesSnapshot = [];
   if (site === "dutchie") {
     try {
       const isDutchiePoweredHost = url && !url.includes("dutchie.com");
       let dutchieFrame = null;
       for (let attempt = 0; attempt < (isDutchiePoweredHost ? 5 : 1); attempt++) {
         const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
-        framesSnapshot = (frames || []).map((f) => ({ id: f.frameId, url: (f.url || "").slice(0, 120) }));
         dutchieFrame = (frames || []).find((f) => f.url && f.url.includes("dutchie.com/embedded-menu"));
         if (dutchieFrame) break;
         if (isDutchiePoweredHost && attempt < 4) await new Promise((r) => setTimeout(r, 800));
@@ -193,33 +190,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
       } else if (dutchieFrame && dutchieFrame.frameId === 0) {
         target = { tabId: tab.id };
       }
-      // #region agent log
-      chrome.runtime.sendMessage({
-        type: "DDD_DEBUG_LOG",
-        payload: {
-          hypothesisId: "A",
-          location: "popup.js:frame selection",
-          message: "injection target",
-          data: {
-            tabUrl: (url || "").slice(0, 100),
-            site,
-            hasFrameIds: !!target.frameIds,
-            frameId: target.frameIds ? target.frameIds[0] : null,
-            foundDutchieFrame: !!dutchieFrame,
-            dutchieFrameId: dutchieFrame ? dutchieFrame.frameId : null,
-          },
-        },
-      }).catch(() => {});
-      chrome.runtime.sendMessage({
-        type: "DDD_DEBUG_LOG",
-        payload: {
-          hypothesisId: "B",
-          location: "popup.js:frames",
-          message: "frame list",
-          data: { frameCount: framesSnapshot.length, frameUrls: framesSnapshot },
-        },
-      }).catch(() => {});
-      // #endregion
     } catch (_) {
       // Fall back to main frame
     }
@@ -235,10 +205,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
     await chrome.scripting.executeScript({
       target,
       files: ["content.js"],
-    });
-    await chrome.scripting.insertCSS({
-      target,
-      files: ["overlay.css"],
     });
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] inject error", e);
@@ -281,24 +247,9 @@ document.getElementById("analyze").addEventListener("click", async () => {
     if (count === 0 && res.noRunAnalyze) debugParts.push("(runAnalyze not found)");
     if (count === 0 && res.stub) debugParts.push("(stub used – real script failed to load)");
     if (count === 0 && res.loadError) debugParts.push("loadError: " + res.loadError);
-    if (count === 0 && res.parseDebug) debugParts.push("parseDebug: " + JSON.stringify(res.parseDebug));
     if (count === 0 && res.bodyTextLength != null) debugParts.push("bodyTextLen: " + res.bodyTextLength);
-    if (res.badgeDebug) debugParts.push("badgeDebug: " + JSON.stringify(res.badgeDebug, null, 2));
     const debugExtra = debugParts.length ? "\n" + debugParts.join("\n") : "";
     setDebug(count, parser, debugExtra);
-    // #region agent log
-    if (count === 0) {
-      chrome.runtime.sendMessage({
-        type: "DDD_DEBUG_LOG",
-        payload: {
-          hypothesisId: "C",
-          location: "popup.js:after analyze",
-          message: "parseDebug from iframe",
-          data: { site, count, parseDebug: res.parseDebug ?? "missing" },
-        },
-      }).catch(() => {});
-    }
-    // #endregion
     if (count === 0) {
       setOutput("No items detected on this page.");
     } else {
@@ -314,10 +265,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ["content.js"],
-          });
-          await chrome.scripting.insertCSS({
-            target: { tabId: tab.id },
-            files: ["overlay.css"],
           });
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
