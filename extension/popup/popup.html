@@ -8,17 +8,19 @@
 </head>
 <body>
   <div class="container">
-    <h1 class="title">Daily Dispo Deals – Deal Checker</h1>
+    <header class="header">
+      <img src="../icons/logo.png" alt="Daily Dispo Deals" class="logo">
+      <div class="header-text">
+        <h1 class="title">Daily Dispo Deals</h1>
+        <p class="subtitle">Deal Checker</p>
+      </div>
+    </header>
     <p id="status" class="status">Checking site…</p>
     <div class="actions">
       <button id="analyze" name="ddd-analyze" type="button">Analyze this page</button>
       <button id="clear" name="ddd-clear" type="button">Clear badges</button>
     </div>
     <div id="output" class="output"></div>
-    <div class="debug-section">
-      <span class="debug-label">Debug</span>
-      <pre id="debug-content">—</pre>
-    </div>
   </div>
   <script src="../utils/id.js"></script>
   <script src="../utils/domains.js"></script>

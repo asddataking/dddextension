@@ -332,10 +332,22 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
   let v2Status = "Idle";
   const hostname = (() => { try { return new URL(pageUrl || "").hostname || ""; } catch (_) { return ""; } })();
   const baseList = scoredItems.slice(0, 100);
-  const listItemsWithRef = baseList.map((r, i) => ({
-    ...r,
-    client_ref: typeof makeClientRef === "function" ? makeClientRef(r, i, hostname) : "ddd-" + i,
-  }));
+  const listItemsWithRef = baseList.map((r, i) => {
+    let productType = r.productType || "other";
+    let bulkFlower = r.isBulkFlower;
+    if (typeof inferProductType === "function" && r.rawText) {
+      productType = inferProductType(r.rawText, r.weightGrams, r.mgTotal);
+      if (productType === "flower" && typeof isBulkFlower === "function") {
+        bulkFlower = isBulkFlower(r.rawText, productType);
+      }
+    }
+    return {
+      ...r,
+      productType,
+      isBulkFlower: productType === "flower" ? bulkFlower : undefined,
+      client_ref: typeof makeClientRef === "function" ? makeClientRef(r, i, hostname) : "ddd-" + i,
+    };
+  });
 
   const backdrop = document.createElement("div");
   backdrop.className = "ddd-sidebar-backdrop ddd-site-" + siteTheme;
@@ -625,7 +637,7 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
 
   const displayName = (name) => {
     let s = (name || "").trim() || "Product";
-    s = s.replace(/\b(bulk[- ]?flower|pre[- ]?packaged|pre[- ]?pack|hybrid|indica|sativa)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+    s = s.replace(/\b(bulk[- ]?flower|pre[- ]?pack(?:aged|ed)?|hybrid|indica|sativa)\b/gi, "").replace(/\s{2,}/g, " ").trim();
     return s.length > 56 ? s.slice(0, 53) + "…" : s;
   };
   const formatMetric = (score) => {
@@ -660,6 +672,8 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
   const list = document.createElement("div");
   list.className = "ddd-sidebar-list";
   list.setAttribute("data-ddd-list", "true");
+  list.setAttribute("tabindex", "0");
+  list.setAttribute("aria-label", "Deals list — use arrow keys to change page");
   const listHeader = document.createElement("div");
   listHeader.className = "ddd-sidebar-list-header";
   const listTitle = document.createElement("div");
@@ -672,8 +686,14 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
   const filterBtn = document.createElement("button");
   filterBtn.type = "button";
   filterBtn.className = "ddd-sidebar-filter-btn";
+  filterBtn.innerHTML = "<span class=\"ddd-filter-icon\" aria-hidden=\"true\">" +
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"4\" y1=\"21\" x2=\"4\" y2=\"14\"/><line x1=\"4\" y1=\"10\" x2=\"4\" y2=\"3\"/><line x1=\"12\" y1=\"21\" x2=\"12\" y2=\"12\"/><line x1=\"12\" y1=\"8\" x2=\"12\" y2=\"3\"/><line x1=\"20\" y1=\"21\" x2=\"20\" y2=\"16\"/><line x1=\"20\" y1=\"12\" x2=\"20\" y2=\"3\"/><line x1=\"1\" y1=\"14\" x2=\"7\" y2=\"14\"/><line x1=\"9\" y1=\"8\" x2=\"15\" y2=\"8\"/><line x1=\"17\" y1=\"16\" x2=\"23\" y2=\"16\"/></svg>" +
+    "</span><span class=\"ddd-filter-label\"></span>";
+  const filterLabelSpan = filterBtn.querySelector(".ddd-filter-label");
   const updateFilterBtnLabel = () => {
-    filterBtn.textContent = categoryFilter === "All" ? "Filters" : categoryDisplayLabel(categoryFilter);
+    const isActive = categoryFilter !== "All";
+    filterBtn.classList.toggle("ddd-filter-active", isActive);
+    filterLabelSpan.textContent = isActive ? "Filters · " + categoryDisplayLabel(categoryFilter) : "Filters";
   };
   updateFilterBtnLabel();
   const filterDropdown = document.createElement("div");
@@ -771,6 +791,15 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
       const badgeIcon = (b) => (b === "worth" ? "✓ " : b === "mid" ? "! " : b === "taxed" ? "✕ " : "! ");
       badge.textContent = badgeIcon(row.score ? row.score.badge : "mid") + badgeLabel(row.score ? row.score.badge : "mid");
       topRow.appendChild(badge);
+      const strain = strainBadge(row.strainType) || (row.productType === "flower" ? "H" : null);
+      const strainType = row.strainType || "hybrid";
+      if (strain) {
+        const strainPill = document.createElement("span");
+        strainPill.className = "ddd-sidebar-strain-pill ddd-strain-" + strainType;
+        strainPill.textContent = strain;
+        strainPill.setAttribute("title", strainType === "indica" ? "Indica" : strainType === "sativa" ? "Sativa" : "Hybrid");
+        topRow.appendChild(strainPill);
+      }
       const priceEl = document.createElement("div");
       priceEl.className = "ddd-sidebar-item-price ddd-sidebar-item-metric";
       priceEl.textContent = metricTextForBadge || "";
@@ -778,15 +807,6 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
       item.appendChild(topRow);
       const badgesRow = document.createElement("div");
       badgesRow.className = "ddd-sidebar-item-badges";
-      const strain = strainBadge(row.strainType) || (row.productType === "flower" ? "H" : null);
-      const strainType = row.strainType || "hybrid";
-      if (strain) {
-        const strainTag = document.createElement("span");
-        strainTag.className = "ddd-deal-badge ddd-badge-strain ddd-strain-" + strainType;
-        strainTag.textContent = strain;
-        strainTag.setAttribute("title", strainType === "indica" ? "Indica" : strainType === "sativa" ? "Sativa" : "Hybrid");
-        badgesRow.appendChild(strainTag);
-      }
       if (row.productType === "flower") {
         const packTag = document.createElement("span");
         packTag.className = "ddd-deal-badge " + (row.isBulkFlower === true ? "ddd-badge-bulk" : "ddd-badge-prepack");
@@ -832,17 +852,24 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
       item.appendChild(info);
       listInner.appendChild(item);
     }
-    pageLabel.textContent = page + " / " + totalPages;
+    pageLabel.textContent = "Page " + page + " of " + totalPages;
     prevBtn.disabled = page <= 1;
     nextBtn.disabled = page >= totalPages;
   };
 
-  prevBtn.addEventListener("click", () => {
-    if (currentPage > 1) { currentPage--; renderPage(currentPage); }
-  });
-  nextBtn.addEventListener("click", () => {
-    if (currentPage < totalPages) { currentPage++; renderPage(currentPage); }
-  });
+  const goPrev = () => { if (currentPage > 1) { currentPage--; renderPage(currentPage); } };
+  const goNext = () => { if (currentPage < totalPages) { currentPage++; renderPage(currentPage); } };
+  prevBtn.addEventListener("click", goPrev);
+  nextBtn.addEventListener("click", goNext);
+
+  const handlePaginationKeydown = (e) => {
+    const modal = document.querySelector(".ddd-sidebar-modal");
+    if (!modal || modal.classList.contains("ddd-sidebar-collapsed")) return;
+    if (!backdrop.contains(document.activeElement)) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); goPrev(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); goNext(); }
+  };
+  backdrop.addEventListener("keydown", handlePaginationKeydown);
 
   renderPage(1);
   sidebarScroll.appendChild(list);
@@ -853,11 +880,11 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
   const adAffiliate = document.createElement("div");
   adAffiliate.className = "ddd-sidebar-ad ddd-sidebar-ad-affiliate";
   adAffiliate.setAttribute("aria-label", "Sponsored");
-  adAffiliate.innerHTML = "<span class=\"ddd-sidebar-ad-label\">SPONSORED</span><span class=\"ddd-sidebar-ad-placeholder\">Affiliate ad slot</span>";
+  adAffiliate.innerHTML = "<span class=\"ddd-sidebar-ad-label\">SPONSORED</span><span class=\"ddd-sidebar-ad-copy\">Sponsored deal — helps keep Daily Dispo Deals free</span><span class=\"ddd-sidebar-ad-placeholder\">Affiliate ad slot</span>";
   const adDispensary = document.createElement("div");
   adDispensary.className = "ddd-sidebar-ad ddd-sidebar-ad-dispensary";
   adDispensary.setAttribute("aria-label", "Featured");
-  adDispensary.innerHTML = "<span class=\"ddd-sidebar-ad-label\">FEATURED</span><span class=\"ddd-sidebar-ad-placeholder\">Dispensary promotion</span>";
+  adDispensary.innerHTML = "<span class=\"ddd-sidebar-ad-label\">FEATURED</span><span class=\"ddd-sidebar-ad-copy\">Featured dispensary — limited-time promotion</span><span class=\"ddd-sidebar-ad-placeholder\">Dispensary promotion</span>";
   adsSection.appendChild(adAffiliate);
   adsSection.appendChild(adDispensary);
   sidebarBody.appendChild(adsSection);

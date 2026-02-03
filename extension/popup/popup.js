@@ -14,44 +14,35 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 
 function setOutput(text) {
   const el = document.getElementById("output");
+  el.className = "output";
   el.innerHTML = "";
   el.appendChild(document.createTextNode(text || ""));
 }
 
-function setOutputList(items) {
+function setSuccessMessage(count) {
   const el = document.getElementById("output");
   el.innerHTML = "";
-  if (!items || items.length === 0) {
-    el.textContent = "No items detected.";
-    return;
-  }
-  const trimName = (name) => {
-    const s = (name || "").trim() || "Product";
-    return s.length > 40 ? s.slice(0, 37) + "…" : s;
-  };
-  const formatMetric = (score) => {
-    if (!score || score.metricLabel == null || score.metricValue == null) return "";
-    const v = score.metricValue;
-    const val = Number(v) === Math.round(v) ? String(Math.round(v)) : v.toFixed(2);
-    if (score.metricLabel === "$/g") return "$" + val + "/g";
-    if (score.metricLabel === "$/100mg") return "$" + val + "/100mg";
-    return score.metricLabel + " " + val;
-  };
-  const fragment = document.createDocumentFragment();
-  for (const it of items.slice(0, 15)) {
-    const div = document.createElement("div");
-    div.className = "item";
-    const score = it.score || {};
-    const name = trimName(it.name);
-    const metric = score ? formatMetric(score) : "";
-    div.textContent = (score.label || "—") + " " + name + (metric ? " · " + metric : "");
-    fragment.appendChild(div);
-  }
-  el.appendChild(fragment);
+  el.className = "output output-success" + (count === 0 ? " output-empty" : "");
+  const icon = document.createElement("span");
+  icon.className = "success-icon";
+  icon.textContent = count > 0 ? "✓" : "—";
+  const text = document.createElement("span");
+  text.className = "success-text";
+  text.textContent = count > 0
+    ? "Menu analyzed! " + count + " deals scored. Check the sidebar for details."
+    : "No items detected on this page.";
+  el.appendChild(icon);
+  el.appendChild(text);
 }
 
-function setDebug(count, parser, extra) {
-  document.getElementById("debug-content").textContent = "Items found: " + count + "\nParser: " + parser + (extra || "");
+function setOutputList(items) {
+  const el = document.getElementById("output");
+  el.className = "output";
+  if (!items || items.length === 0) {
+    setSuccessMessage(0);
+    return;
+  }
+  setSuccessMessage(items.length);
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -97,7 +88,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
   const site = detectSite(url);
   if (site !== "weedmaps" && site !== "dutchie") {
     setOutput("Unsupported site. Open a Weedmaps or Dutchie menu page.");
-    setDebug(0, "unknown");
     return;
   }
 
@@ -105,7 +95,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
   const cached = await getCached(cacheKey);
   if (cached && cached.items && cached.items.length > 0) {
     output.textContent = "Applying from cache…";
-    setDebug(cached.items.length, cached.site, "\n(cached)");
     try {
       let target = { tabId: tab.id };
       if (site === "dutchie") {
@@ -131,7 +120,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
         args: [{ items: cached.items, site: cached.site }],
       });
       const applyRes = applyResult && applyResult[0] && applyResult[0].result;
-      setOutputList(cached.items);
+      setSuccessMessage(cached.items.length);
       if (target.frameIds && target.frameIds[0] !== 0) {
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"] });
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
@@ -146,7 +135,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
       if (typeof triggerV2Ingest === "function") {
         triggerV2Ingest(tab.id, cached.site, cached.items, tab.url || "");
       }
-      setDebug(cached.items.length, cached.site, "\n(cached)");
     } catch (e) {
       console.warn("[DDD popup] cache apply error", e);
       const errMsg = (e && e.message) ? String(e.message).slice(0, 100) : "";
@@ -156,7 +144,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
   }
 
   output.textContent = "Analyzing…";
-  setDebug("—", "—");
 
   const hostPatterns = site === "weedmaps" ? ["*://*.weedmaps.com/*", "*://weedmaps.com/*"] : ["*://*.dutchie.com/*", "*://dutchie.com/*"];
   try {
@@ -165,7 +152,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
       const granted = await chrome.permissions.request({ origins: hostPatterns }).catch(() => false);
       if (!granted) {
         setOutput("Permission to access this site was denied. Grant access and try again.");
-        setDebug(0, site);
         return;
       }
     }
@@ -209,7 +195,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] inject error", e);
     setOutput("Could not analyze: " + (e && e.message ? e.message : "inject failed").slice(0, 80));
-    setDebug(0, site);
     return;
   }
 
@@ -237,19 +222,10 @@ document.getElementById("analyze").addEventListener("click", async () => {
     const res = results && results[0] && results[0].result;
     if (!res) {
       setOutput("Could not analyze: no result from page.");
-      setDebug(0, site);
       return;
     }
     const count = res.count ?? 0;
     const items = res.items || [];
-    const parser = res.parser || site;
-    const debugParts = [];
-    if (count === 0 && res.noRunAnalyze) debugParts.push("(runAnalyze not found)");
-    if (count === 0 && res.stub) debugParts.push("(stub used – real script failed to load)");
-    if (count === 0 && res.loadError) debugParts.push("loadError: " + res.loadError);
-    if (count === 0 && res.bodyTextLength != null) debugParts.push("bodyTextLen: " + res.bodyTextLength);
-    const debugExtra = debugParts.length ? "\n" + debugParts.join("\n") : "";
-    setDebug(count, parser, debugExtra);
     if (count === 0) {
       setOutput("No items detected on this page.");
     } else {
@@ -284,7 +260,6 @@ document.getElementById("analyze").addEventListener("click", async () => {
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] run error", e);
     setOutput("Could not analyze: " + (e && e.message ? e.message : "run failed").slice(0, 80));
-    setDebug(0, site);
   }
 });
 

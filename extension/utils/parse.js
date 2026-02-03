@@ -66,6 +66,33 @@ function simpleHash(s) {
 }
 
 /**
+ * Get product type from Dutchie URL when on a category-specific page (e.g. /products/flower).
+ * Dutchie uses /products/{category} in the path. Use this to override text inference when we're
+ * clearly on a flower/vape/etc. tab.
+ * @param {string} url
+ * @returns {ProductType|null}
+ */
+function getProductTypeFromDutchieUrl(url) {
+  if (!url || typeof url !== "string") return null;
+  try {
+    const u = new URL(url);
+    const path = (u.pathname + (u.hash || "")).toLowerCase();
+    // Match /products/flower, /product/flower, /menu/flower, /c/flower, or hash #/products/flower
+    const m = path.match(/(?:\/products?|\/menu|\/c)\/([a-z0-9-]+)/) || path.match(/#\/products?\/([a-z0-9-]+)/);
+    if (!m) return null;
+    const slug = m[1];
+    if (slug === "flower" || slug === "flowers") return "flower";
+    if (slug === "vaporizers" || slug === "vaporizer" || slug === "vape") return "vape";
+    if (slug === "edibles" || slug === "edible") return "edible";
+    if (slug === "concentrates" || slug === "concentrate") return "concentrate";
+    if (slug === "pre-rolls" || slug === "prerolls" || slug === "preroll") return "preroll";
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Infer product type from raw text.
  * @param {string} text
  * @param {number} [weightGrams]
@@ -80,9 +107,14 @@ function inferProductType(text, weightGrams, mgTotal) {
   if (weightGrams != null && weightGrams > 0) return "flower";
   if (/\b(flower|eighth|quarter|half|oz)\b/.test(t)) return "flower";
   if (/\b(indica|sativa|hybrid)\b/.test(t)) return "flower";
+  // "Bulk Flower", "Pre-Packed" etc. in product names → flower
+  if (/\b(bulk\s*flower|pre[- ]?pack(?:ed|aged)?)\b/.test(t)) return "flower";
   // Weight patterns (1g, 1/8, oz) → flower; check before vape so flower with weight text wins
   if (WEIGHT_GRAM_REGEX.test(t) || WEIGHT_FRAC_REGEX.test(t) || OZ_REGEX.test(t)) return "flower";
+  // Only vape if explicitly cartridge; avoid false positives from nav/tab text containing "vape"
   if (/\bcartridge\b/.test(t)) return "vape";
+  // Products with $/g pricing (weight-based) are almost always flower; default flower when we have weight context
+  if (/\d+\s*g\b|\d+\.\d+\s*g\b|1\/8|1\/4|1\/2|3\.5\s*g|7\s*g|14\s*g|28\s*g/i.test(t)) return "flower";
   return "other";
 }
 
@@ -450,6 +482,9 @@ function parseItemsFromDOM(site) {
     const doc = typeof document !== "undefined" ? document : null;
     if (!doc || !doc.body) return [];
 
+    const pageUrl = (typeof document !== "undefined" && document.location) ? document.location.href : "";
+    const urlProductType = site === "dutchie" ? getProductTypeFromDutchieUrl(pageUrl) : null;
+
     const candidates = findCardCandidates(doc, site);
     const items = [];
     const usedIds = new Set();
@@ -467,7 +502,8 @@ function parseItemsFromDOM(site) {
 
       const weightGrams = parseWeightGrams(fullText);
       const mgTotal = parseMgTotal(fullText);
-      const productType = inferProductType(fullText, weightGrams, mgTotal);
+      let productType = inferProductType(fullText, weightGrams, mgTotal);
+      if (urlProductType) productType = urlProductType;
 
       let name = "";
       if (site === "weedmaps") {

@@ -1,0 +1,11 @@
+{
+  "name": "dddextension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "pack": "node scripts/pack.js"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.0"
+  }
+}
