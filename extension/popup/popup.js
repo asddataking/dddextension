@@ -1,5 +1,5 @@
 /**
- * Popup: status, Analyze (inject + message), Clear, output area.
+ * Popup: status, Analyze (inject + message), Clear.
  */
 const DEBUG = false;
 
@@ -12,37 +12,14 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   document.getElementById("status").textContent = "Site: " + label;
 });
 
-function setOutput(text) {
-  const el = document.getElementById("output");
-  el.className = "output";
-  el.innerHTML = "";
-  el.appendChild(document.createTextNode(text || ""));
+function setStatus(text) {
+  const el = document.getElementById("status");
+  if (el) el.textContent = text || "";
 }
 
-function setSuccessMessage(count) {
-  const el = document.getElementById("output");
-  el.innerHTML = "";
-  el.className = "output output-success" + (count === 0 ? " output-empty" : "");
-  const icon = document.createElement("span");
-  icon.className = "success-icon";
-  icon.textContent = count > 0 ? "✓" : "—";
-  const text = document.createElement("span");
-  text.className = "success-text";
-  text.textContent = count > 0
-    ? "Menu analyzed! " + count + " deals scored. Check the sidebar for details."
-    : "No items detected on this page.";
-  el.appendChild(icon);
-  el.appendChild(text);
-}
-
-function setOutputList(items) {
-  const el = document.getElementById("output");
-  el.className = "output";
-  if (!items || items.length === 0) {
-    setSuccessMessage(0);
-    return;
-  }
-  setSuccessMessage(items.length);
+function setStatusWithSite(site, message) {
+  const label = site === "weedmaps" ? "Weedmaps" : site === "dutchie" ? "Dutchie" : "Unknown";
+  setStatus("Site: " + label + (message ? " · " + message : ""));
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -78,23 +55,22 @@ async function setCached(cacheKey, data) {
 }
 
 document.getElementById("analyze").addEventListener("click", async () => {
-  const output = document.getElementById("output");
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    setOutput("No active tab.");
+    setStatus("No active tab.");
     return;
   }
   const url = tab.url || "";
   const site = detectSite(url);
   if (site !== "weedmaps" && site !== "dutchie") {
-    setOutput("Unsupported site. Open a Weedmaps or Dutchie menu page.");
+    setStatus("Unsupported site. Open a Weedmaps or Dutchie menu page.");
     return;
   }
 
   const cacheKey = getCacheKey(url, site);
   const cached = await getCached(cacheKey);
   if (cached && cached.items && cached.items.length > 0) {
-    output.textContent = "Applying from cache…";
+    setStatus("Applying from cache…");
     try {
       let target = { tabId: tab.id };
       if (site === "dutchie") {
@@ -120,7 +96,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
         args: [{ items: cached.items, site: cached.site }],
       });
       const applyRes = applyResult && applyResult[0] && applyResult[0].result;
-      setSuccessMessage(cached.items.length);
+      setStatusWithSite(site, "Menu analyzed! " + cached.items.length + " deals scored. Check the sidebar for details.");
       if (target.frameIds && target.frameIds[0] !== 0) {
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["stub.js", "utils/domains.js", "utils/parse.js", "utils/scoring.js", "v2/config.js", "v2/installId.js", "v2/mapToIngestPayload.js", "v2/clientRef.js", "v2/overlayStore.js"] });
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
@@ -138,12 +114,12 @@ document.getElementById("analyze").addEventListener("click", async () => {
     } catch (e) {
       console.warn("[DDD popup] cache apply error", e);
       const errMsg = (e && e.message) ? String(e.message).slice(0, 100) : "";
-      setOutput("Cache apply failed" + (errMsg ? ": " + errMsg : " — run Analyze again."));
+      setStatus("Cache apply failed" + (errMsg ? ": " + errMsg : " — run Analyze again."));
     }
     return;
   }
 
-  output.textContent = "Analyzing…";
+  setStatus("Analyzing…");
 
   const hostPatterns = site === "weedmaps" ? ["*://*.weedmaps.com/*", "*://weedmaps.com/*"] : ["*://*.dutchie.com/*", "*://dutchie.com/*"];
   try {
@@ -151,7 +127,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
     if (!has) {
       const granted = await chrome.permissions.request({ origins: hostPatterns }).catch(() => false);
       if (!granted) {
-        setOutput("Permission to access this site was denied. Grant access and try again.");
+        setStatus("Permission to access this site was denied. Grant access and try again.");
         return;
       }
     }
@@ -194,7 +170,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
     });
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] inject error", e);
-    setOutput("Could not analyze: " + (e && e.message ? e.message : "inject failed").slice(0, 80));
+    setStatus("Could not analyze: " + (e && e.message ? e.message : "inject failed").slice(0, 80));
     return;
   }
 
@@ -221,15 +197,15 @@ document.getElementById("analyze").addEventListener("click", async () => {
     });
     const res = results && results[0] && results[0].result;
     if (!res) {
-      setOutput("Could not analyze: no result from page.");
+      setStatus("Could not analyze: no result from page.");
       return;
     }
     const count = res.count ?? 0;
     const items = res.items || [];
     if (count === 0) {
-      setOutput("No items detected on this page.");
+      setStatusWithSite(site, "No items detected on this page.");
     } else {
-      setOutputList(items);
+      setStatusWithSite(site, "Menu analyzed! " + count + " deals scored. Check the sidebar for details.");
       await setCached(cacheKey, { items: res.items, site });
       // Show sidebar in main frame so it stays fixed when user scrolls (Dutchie menu is in iframe).
       if (target.frameIds && target.frameIds[0] !== 0 && res.items && res.items.length > 0) {
@@ -259,14 +235,14 @@ document.getElementById("analyze").addEventListener("click", async () => {
     }
   } catch (e) {
     if (DEBUG) console.warn("[DDD popup] run error", e);
-    setOutput("Could not analyze: " + (e && e.message ? e.message : "run failed").slice(0, 80));
+    setStatus("Could not analyze: " + (e && e.message ? e.message : "run failed").slice(0, 80));
   }
 });
 
 document.getElementById("clear").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    setOutput("No active tab.");
+    setStatus("No active tab.");
     return;
   }
   const clearFunc = () => {
@@ -291,8 +267,26 @@ document.getElementById("clear").addEventListener("click", async () => {
       });
       removed += (iframeResult && iframeResult[0] && iframeResult[0].result) ?? 0;
     }
-    setOutput(removed > 0 ? "Badges cleared." : "Nothing to clear (or page changed).");
+    const url = tab.url || "";
+    const site = detectSite(url);
+    setStatusWithSite(site, removed > 0 ? "Badges cleared." : "Nothing to clear (or page changed).");
   } catch (e) {
-    setOutput("Could not clear: " + (e && e.message ? e.message : "error").slice(0, 60));
+    setStatus("Could not clear: " + (e && e.message ? e.message : "error").slice(0, 60));
   }
+});
+
+document.getElementById("testIngest").addEventListener("click", () => {
+  setStatus("Sending test payload…");
+  chrome.runtime.sendMessage({ type: "DDD_V2_INGEST_TEST" }, (response) => {
+    if (chrome.runtime.lastError) {
+      setStatus("Test failed: " + (chrome.runtime.lastError.message || "no response"));
+      return;
+    }
+    const r = response || {};
+    if (r.ok && r.status) {
+      setStatus("Test sent: " + r.status);
+    } else {
+      setStatus("Test failed: " + (r.status || "") + " " + (r.error || "unknown").slice(0, 60));
+    }
+  });
 });

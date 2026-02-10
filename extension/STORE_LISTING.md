@@ -36,7 +36,7 @@ Daily Dispo Deals Deal Checker overlays simple value badges on cannabis dispensa
 - Worth It / Mid / Taxed badges with $/g or $/100mg
 - Filter by product type (flower, vape, edible, etc.)
 - Pagination and keyboard shortcuts
-- Built in Michigan with cannabis consumers in mind
+- Built in Michigan; works on any Weedmaps or Dutchie menu nationwide
 
 **Supported sites**
 - Weedmaps (weedmaps.com)
@@ -50,8 +50,7 @@ Scoring runs locally. Optional data may be sent to Daily Dispo Deals only when y
 
 ## Category suggestion
 
-- **Productivity** – helps users make faster decisions
-- Or **Shopping** – deal-finding tool
+- **Shopping** – deal-finding tool for dispensary menus
 
 ---
 

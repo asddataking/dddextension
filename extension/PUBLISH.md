@@ -56,7 +56,7 @@ Fill in:
 - **Short description** (132 chars max): Already in manifest:  
   `Overlay Worth It / Mid / Taxed badges on dispensary menu product cards.`
 - **Detailed description**: Use the content from `STORE_LISTING.md`
-- **Category**: e.g. **Productivity** or **Shopping**
+- **Category**: **Shopping** (deal-finding tool)
 - **Language**: English (add more if localized)
 - **Screenshots**: Upload 1–5 images (1280×800 px)
 - **Small promo tile**: 440×280 px

@@ -382,7 +382,7 @@ async function showSidebarModal(scoredItems, site, pageUrl) {
   headerLeft.appendChild(titleWrap);
   const builtIn = document.createElement("div");
   builtIn.className = "ddd-sidebar-built-in";
-  builtIn.textContent = "Built in Michigan";
+  builtIn.textContent = "Built in Michigan · Works on any Weedmaps or Dutchie menu nationwide";
   headerLeft.appendChild(builtIn);
   if (typeof DEV_SHOW_CSS_VERSION !== "undefined" && DEV_SHOW_CSS_VERSION && typeof window !== "undefined" && window.__dddCssVersion) {
     const cssStamp = document.createElement("span");

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build:env": "node scripts/inject-env.js",
     "pack": "node scripts/pack.js"
   },
   "devDependencies": {

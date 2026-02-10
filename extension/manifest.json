@@ -21,7 +21,7 @@
     "*://dutchie.com/*",
     "*://mindrightmi.com/*",
     "*://*.mindrightmi.com/*",
-    "*://dailydispodeals.com/*"
+    "*://dailydispodeals.com/*","https://dailydispodeals.com/*","http://localhost/*","http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "service-worker.js"

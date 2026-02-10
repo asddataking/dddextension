@@ -2,6 +2,10 @@
 
 Chrome Extension (Manifest V3) that overlays **Worth It / Mid / Taxed** badges on dispensary menu product cards. Supported sites: **Weedmaps** and **Dutchie**.
 
+## Build step (required for ingest)
+
+Before loading the extension or running `npm run pack`, run **`npm run build:env`** from the repo root. This reads `.env.local` (or `.env`) and writes `extension/generated-env.js` with `DDD_EXTENSION_API_KEY` and `INGEST_BASE_URL`. Without it, ingest requests will not include the API key and may be rejected. The file `extension/generated-env.js` is gitignored; do not commit it.
+
 ## How to load (unpacked)
 
 1. Open Chrome and go to `chrome://extensions`.

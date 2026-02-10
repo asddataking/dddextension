@@ -1,10 +1,9 @@
 /**
- * V2 feature flag and API config.
+ * V2 feature flag and dev config.
+ * Ingest URL and API key come from the service worker (generated-env.js); run npm run build:env before pack.
  */
 var V2_ENABLED = true;
-var V2_API_BASE = "https://dailydispodeals.com";
-var V2_INGEST_PATH = "/api/ingest/extension";
-var V2_TIMEOUT_MS = 8000;
+var V2_TIMEOUT_MS = 12000;
 /** Set true to show fake overlay on first item (for testing when no real overlay data). */
 var DEBUG_OVERLAY = false;
 /** Set true to show CSS version stamp in sidebar header. */

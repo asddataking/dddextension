@@ -55,7 +55,6 @@
 .actions {
   display: flex;
   gap: 10px;
-  margin-bottom: 14px;
 }
 
 .actions button {
@@ -94,56 +93,4 @@
 #analyze:hover:not(:disabled) {
   background: #1e293b;
   border-color: #1e293b;
-}
-
-.output {
-  min-height: 44px;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 13px;
-  margin-bottom: 10px;
-}
-
-.output-success {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-}
-
-.output-success .success-icon {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #22c55e;
-  color: #fff;
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.output-success .success-text {
-  font-size: 13px;
-  color: #166534;
-  line-height: 1.4;
-}
-
-.output-success.output-empty {
-  background: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-.output-success.output-empty .success-icon {
-  background: #94a3b8;
-}
-
-.output-success.output-empty .success-text {
-  color: #64748b;
 }
