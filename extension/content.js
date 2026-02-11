@@ -51,6 +51,32 @@ injectDDDCheckerStyles();
 
 const DEBUG = false;
 
+// Badge-level debug logging helper. This is intentionally defensive and
+// must never throw, otherwise Analyze would fail with "no result from page".
+// When DEBUG is true, it forwards logs to the background script; otherwise
+// it is effectively a no-op.
+let badgeDebug = null;
+function dddBadgeLog(event, payload) {
+  try {
+    if (!DEBUG) return;
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage(
+        {
+          type: "DDD_DEBUG_LOG",
+          source: "badge",
+          event: event,
+          payload: payload || null,
+        },
+        () => {}
+      );
+    } else if (typeof console !== "undefined" && console.debug) {
+      console.debug("[DDD badge]", event, payload || null);
+    }
+  } catch (_) {
+    // Swallow any logging errors to keep Analyze path robust.
+  }
+}
+
 /** Find element by selector, traversing into shadow roots (Dutchie/Weedmaps use shadow DOM). */
 function querySelectorIncludingShadow(root, selector) {
   if (!root) return null;
